@@ -1,0 +1,145 @@
+// Reine Hilfsfunktionen ohne DOM – werden auch von den Tests genutzt.
+
+export const pad = (n) => String(n).padStart(2, '0');
+
+// Lokales Datum als 'YYYY-MM-DD'.
+export function dayKey(d = new Date()) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Fortlaufende Tagesnummer, unabhängig von Zeitzone und Sommerzeit.
+export function dayNumber(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return Math.round(Date.UTC(y, m - 1, d) / 86400000);
+}
+
+export function keyFromNumber(n) {
+  const d = new Date(n * 86400000);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+// Unix-Sekunden für 00:00 Uhr lokale Zeit an diesem Tag.
+export function dayStartSec(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return Math.floor(new Date(y, m - 1, d).getTime() / 1000);
+}
+
+// FNV-1a, 32 Bit.
+export function hash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+// mulberry32 – kleiner, deterministischer Zufallsgenerator.
+export function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function shuffled(arr, seedStr) {
+  const out = [...arr];
+  const r = rng(hash(seedStr));
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+export const needs = (text) => ({ a: text.includes('{A}'), b: text.includes('{B}') });
+
+// Die Tagesfrage einer Gruppe wird von allen Geräten gleich berechnet –
+// ohne Server. Jede Gruppe hat ihre eigene, gemischte Reihenfolge.
+// Sobald jemand abgestimmt hat, gilt die Frage aus dieser Stimme (siehe
+// frozenDaily), damit sich nichts mehr verschiebt, wenn Leute beitreten
+// oder Fragenpakete geändert werden.
+export function dailyRound(meta, members, key, catalog) {
+  const pool = catalog
+    .filter((q) => meta.packs.includes(q.pack))
+    .sort((x, y) => (x.id < y.id ? -1 : 1));
+  if (!pool.length) return null;
+
+  // Für Platzhalter nur Leute, die schon vor diesem Tag dabei waren.
+  const start = dayStartSec(key);
+  let people = members.filter((m) => m.joined < start);
+  if (people.length < 2) people = members;
+  people = [...people].sort((x, y) => (x.pk < y.pk ? -1 : 1));
+
+  let n = Math.max(0, dayNumber(key) - dayNumber(meta.start));
+  for (let tries = 0; tries < pool.length; tries++, n++) {
+    const cycle = Math.floor(n / pool.length);
+    const q = shuffled(pool, `${meta.seed}:${cycle}`)[n % pool.length];
+    const need = needs(q.text);
+    if ((need.b && people.length < 2) || (need.a && people.length < 1)) continue;
+    const r = rng(hash(`${meta.seed}:${key}:subj`));
+    const left = [...people];
+    const subj = [];
+    if (need.a) subj.push(left.splice(Math.floor(r() * left.length), 1)[0].pk);
+    if (need.b) subj.push(left.splice(Math.floor(r() * left.length), 1)[0].pk);
+    return { rid: 'd' + key, day: key, daily: true, qid: q.id, subj };
+  }
+  return null;
+}
+
+// Erste Stimme legt die Tagesfrage fest.
+export function frozenDaily(round, votes) {
+  const first = [...votes]
+    .filter((v) => v.data.qid)
+    .sort((x, y) => x.at - y.at || (x.by < y.by ? -1 : 1))[0];
+  if (!first) return round;
+  return { ...round, qid: first.data.qid, subj: first.data.subj || [] };
+}
+
+export const TYPE_LABEL = {
+  who: 'Wer von uns?',
+  yesno: 'Ja oder nein?',
+  never: 'Ich hab noch nie …',
+  either: 'Entweder oder',
+  text: 'Erzähl mal',
+};
+
+export function optionsFor(q, members) {
+  switch (q.type) {
+    case 'who':
+      return members.map((m) => ({ value: m.pk, label: m.name, member: m }));
+    case 'yesno':
+      return [{ value: '0', label: 'Ja' }, { value: '1', label: 'Nein' }];
+    case 'never':
+      return [{ value: '0', label: 'Hab ich schon 🙋' }, { value: '1', label: 'Noch nie 😇' }];
+    case 'either':
+      return (q.options || []).map((o, i) => ({ value: String(i), label: o }));
+    default:
+      return [];
+  }
+}
+
+// Stimmen pro Option, sortiert nach Anzahl.
+export function tally(options, votes) {
+  const rows = options.map((o) => ({ ...o, voters: votes.filter((v) => v.data.choice === o.value) }));
+  return rows
+    .filter((r) => r.voters.length)
+    .sort((x, y) => y.voters.length - x.voters.length);
+}
+
+// Tage in Folge, an denen die Tagesfrage beantwortet wurde. Heute zählt
+// erst, wenn beantwortet – bis dahin bleibt die Serie von gestern stehen.
+export function streak(votedDays, today) {
+  let n = dayNumber(today);
+  if (!votedDays.has(today)) n--;
+  let s = 0;
+  while (votedDays.has(keyFromNumber(n))) {
+    s++;
+    n--;
+  }
+  return s;
+}
