@@ -2,7 +2,7 @@ import { Store, LS, parseInvite, DEFAULT_RELAYS, b64u } from './store.js';
 import { CATALOG, PACKS, DEFAULT_PACKS, MAIN_PACK, questionById } from './questions.js';
 import * as L from './logic.js';
 
-const REPO_URL = 'https://github.com/';
+const REPO_URL = 'https://github.com/Portagoras/fragerunde';
 const store = new Store();
 const app = document.getElementById('app');
 const ui = { sel: {}, edit: null, lastRoute: null, today: L.dayKey() };
