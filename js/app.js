@@ -1,5 +1,5 @@
 import { Store, LS, parseInvite, DEFAULT_RELAYS, b64u } from './store.js';
-import { CATALOG, PACKS, DEFAULT_PACKS, questionById } from './questions.js';
+import { CATALOG, PACKS, DEFAULT_PACKS, MAIN_PACK, questionById } from './questions.js';
 import * as L from './logic.js';
 
 const REPO_URL = 'https://github.com/';
@@ -47,10 +47,14 @@ function emojiPicker(current) {
 function packPicker(selected) {
   return `<div class="packs">${PACKS.map((p) => {
     const n = CATALOG.filter((q) => q.pack === p.id).length;
-    return `<label class="pack"><input type="checkbox" name="pack" value="${p.id}" ${selected.includes(p.id) ? 'checked' : ''}>
-      <span class="pemoji">${p.emoji}</span><span class="ptext"><b>${esc(p.name)}</b><small>${esc(p.desc)} · ${n} Fragen</small></span></label>`;
+    const main = p.id === MAIN_PACK;
+    return `<label class="pack"><input type="checkbox" name="pack" value="${p.id}" ${main || selected.includes(p.id) ? 'checked' : ''} ${main ? 'disabled' : ''}>
+      <span class="pemoji">${p.emoji}</span><span class="ptext"><b>${esc(p.name)}${main ? ' · immer dabei' : ''}</b><small>${esc(p.desc)} · ${n} Fragen</small></span></label>`;
   }).join('')}</div>`;
 }
+
+// Das Hauptpaket ist im Formular deaktiviert und fehlt deshalb in FormData.
+const packsFrom = (f) => [MAIN_PACK, ...new FormData(f).getAll('pack').filter((p) => p !== MAIN_PACK)];
 
 function qrSvg(text) {
   const qr = window.qrcode(0, 'M');
@@ -98,6 +102,13 @@ const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform 
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const inviteUrl = (code) => `${location.origin}${location.pathname}#join=${code}`;
 
+// "morgen" oder "am Freitag, 23. Oktober"
+function dateLabel(key) {
+  if (L.dayNumber(key) === L.dayNumber(L.dayKey()) + 1) return 'morgen';
+  const [y, m, d] = key.split('-').map(Number);
+  return 'am ' + new Date(y, m - 1, d).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
 function dayLabel(key) {
   const t = L.dayNumber(L.dayKey());
   const n = L.dayNumber(key);
@@ -125,20 +136,58 @@ function personOf(v, pk) {
   return (v._people ||= people(v)).get(pk) || { pk, name: 'Unbekannt', emoji: '👤' };
 }
 
-function daily(v, key) {
+function packRound(v, key, pack) {
   if (!v.meta) return null;
-  const r = L.dailyRound(v.meta, v.members, key, CATALOG);
-  const votes = v.votes.get('d' + key) || [];
+  const rid = `d${key}:${pack}`;
+  const votes = v.votes.get(rid) || [];
+  const r = L.dailyRound(v.meta, v.members, key, CATALOG, pack);
   if (!r) {
     // Ohne passende Fragen gibt es nur dann eine Runde, wenn schon jemand abgestimmt hat.
-    return votes.length ? L.frozenDaily({ rid: 'd' + key, day: key, daily: true }, votes) : null;
+    return votes.length ? L.frozenDaily({ rid, day: key, daily: true, pack }, votes) : null;
   }
   return L.frozenDaily(r, votes);
 }
 
+// Wann welche eigene Frage dran ist (FIFO, eine pro Tag).
+const schedule = (v) => (v._schedule ||= L.scheduleCustom(v.rounds));
+
+function customRound(v, r) {
+  const slot = schedule(v).get(r.rid);
+  return slot ? { ...r, slot } : null;
+}
+
+// Alle Fragen eines Tages: Tagesfrage, je eine pro Zusatzpaket, dazu die
+// eigene Frage aus der Warteschlange. Abgeschaltete Pakete erscheinen
+// an Tagen, an denen schon jemand geantwortet hat, trotzdem.
+function dayRounds(v, key) {
+  if (!v.meta) return [];
+  const packs = PACKS.map((p) => p.id).filter(
+    (id) => id === MAIN_PACK || v.meta.packs.includes(id) || v.votes.has(`d${key}:${id}`),
+  );
+  const custom = v.rounds.map((r) => customRound(v, r)).filter((r) => r && r.slot === key);
+  return [...packs.map((p) => packRound(v, key, p)), ...custom].filter(Boolean);
+}
+
 function roundById(v, rid) {
-  if (rid.startsWith('d')) return daily(v, rid.slice(1));
-  return v.rounds.find((r) => r.rid === rid) || null;
+  if (rid.startsWith('d')) {
+    const [key, pack] = rid.slice(1).split(':');
+    return pack ? packRound(v, key, pack) : null;
+  }
+  const r = v.rounds.find((x) => x.rid === rid);
+  const round = r && customRound(v, r);
+  // Eigene Fragen bleiben bis zu ihrem Tag eine Überraschung.
+  if (!round || (round.slot > L.dayKey() && round.by !== store.pk)) return null;
+  return round;
+}
+
+const mineIn = (v, rid) => (v.votes.get(rid) || []).find((x) => x.by === store.pk);
+
+function queueOf(v) {
+  const today = L.dayKey();
+  return v.rounds
+    .map((r) => customRound(v, r))
+    .filter((r) => r && r.slot > today)
+    .sort((a, b) => (a.slot < b.slot ? -1 : 1));
 }
 
 const questionOf = (round) => (round.daily ? questionById(round.qid) : round.q);
@@ -159,10 +208,14 @@ function optionsOf(v, q, votes) {
   return L.optionsFor(q, list);
 }
 
+// Ein Tag zählt für die Serie, wenn die Tagesfrage beantwortet wurde.
 function myStreak(v) {
   const days = new Set();
+  const suffix = ':' + MAIN_PACK;
   for (const [rid, list] of v.votes) {
-    if (rid.startsWith('d') && list.some((x) => x.by === store.pk)) days.add(rid.slice(1));
+    if (rid.startsWith('d') && rid.endsWith(suffix) && list.some((x) => x.by === store.pk)) {
+      days.add(rid.slice(1, -suffix.length));
+    }
   }
   return L.streak(days, L.dayKey());
 }
@@ -194,23 +247,29 @@ function roundCard(v, round, { link = false } = {}) {
   const votes = v.votes.get(round.rid) || [];
   const mine = votes.find((x) => x.by === store.pk);
   const total = v.members.length;
-  const from = round.daily ? 'Frage des Tages' : `Frage von ${esc(personOf(v, round.by).name)}`;
-  const head = `<div class="qpanel"><span class="qtype">${from} · ${L.TYPE_LABEL[q.type] || ''}</span><h2>${fill(q.text, v, round.subj)}</h2></div>`;
+  const pack = PACKS.find((p) => p.id === round.pack);
+  const from = !round.daily
+    ? `Frage von ${esc(personOf(v, round.by).name)} · ${L.TYPE_LABEL[q.type] || ''}`
+    : round.pack === MAIN_PACK
+      ? `Frage des Tages · ${L.TYPE_LABEL[q.type] || ''}`
+      : `${pack?.emoji || ''} ${esc(pack?.name || '')}`;
+  const head = `<div class="qpanel"><span class="qtype">${from}</span><h2>${fill(q.text, v, round.subj)}</h2></div>`;
   const showResults = mine && ui.edit !== round.rid;
   const body = showResults ? results(v, round, q, votes) : answerForm(v, round, q, votes, mine);
   return `<section class="card round">
     ${link ? `<a class="qlink" href="#/g/${v.id}/r/${round.rid}">${head}</a>` : head}
     <div class="cbody"><p class="count">${votes.length} von ${total} ${total === 1 ? 'hat' : 'haben'} geantwortet</p>${body}</div>
-    ${link ? '' : discussion(v, round, !!mine)}
+    ${link ? (mine ? `<a class="disc-link" href="#/g/${v.id}/r/${round.rid}">💬 Diskussion${(v.comments.get(round.rid) || []).length ? ` (${v.comments.get(round.rid).length})` : ''} →</a>` : '') : discussion(v, round, !!mine)}
   </section>`;
 }
 
 function answerForm(v, round, q, votes, mine) {
   const rid = round.rid;
+  const cancel = mine ? `<button type="button" class="link" data-action="cancel-edit" data-rid="${rid}">Abbrechen</button>` : '';
   if (q.type === 'text') {
     return `<form class="answer" data-form="answer" data-rid="${rid}">
       <textarea id="ans-${rid}" name="text" rows="3" maxlength="300" required placeholder="Deine Antwort …">${esc(mine?.data.text || '')}</textarea>
-      <button class="btn primary">Antworten</button></form>`;
+      <button class="btn primary">Antworten</button>${cancel}</form>`;
   }
   const opts = optionsOf(v, q, votes);
   const sel = ui.sel[rid] ?? mine?.data.choice;
@@ -222,7 +281,7 @@ function answerForm(v, round, q, votes, mine) {
     .join('')}</div>
     <button class="btn primary" data-action="vote" data-rid="${rid}" ${sel == null ? 'disabled' : ''}>${
       q.type === 'who' ? 'Stimme abgeben' : 'Antwort abgeben'
-    }</button>`;
+    }</button>${cancel}`;
 }
 
 function results(v, round, q, votes) {
@@ -273,12 +332,17 @@ function profileFields(name, emoji) {
 // ---------- Ansichten ----------
 
 function vHome() {
+  if (!store.ready && LS.get('groups', []).length) return '<p class="empty spin">Lädt …</p>';
   const groups = [...store.groups.keys()].map((id) => store.view(id));
   const list = groups
     .map((v) => {
-      const d = daily(v, L.dayKey());
-      const answered = d && (v.votes.get(d.rid) || []).some((x) => x.by === store.pk);
-      const status = !v.meta ? (v.loading ? 'Lädt …' : 'Keine Daten gefunden') : !v.me ? 'Profil anlegen' : answered ? '✓ Heute beantwortet' : '🔥 Neue Frage wartet';
+      const open = dayRounds(v, L.dayKey()).filter((x) => !mineIn(v, x.rid)).length;
+      const answered = !open;
+      const status = !v.meta
+        ? v.loading ? 'Lädt …' : 'Keine Daten gefunden'
+        : !v.me ? 'Profil anlegen'
+        : answered ? '✓ Heute alles beantwortet'
+        : `🔥 ${open} ${open === 1 ? 'offene Frage' : 'offene Fragen'}`;
       return `<a class="gcard ${answered ? '' : 'hot'}" href="#/g/${v.id}">
         <div><b>${esc(v.meta?.name || 'Gruppe')}</b><small>${status}</small></div>${stack(v.members)}</a>`;
     })
@@ -301,7 +365,8 @@ function vNew() {
     <label for="gname">Name der Gruppe</label>
     <input id="gname" name="gname" required maxlength="40" placeholder="z. B. Die Chaoten">
     ${profileFields(LS.get('name', ''), null)}
-    <label>Fragenpakete</label>${packPicker(DEFAULT_PACKS)}
+    <label>Fragenpakete</label>
+    <p class="hint">Jedes Paket stellt jeden Tag eine eigene Frage.</p>${packPicker(DEFAULT_PACKS)}
     <button class="btn primary">Gruppe erstellen</button>
   </form></main>`;
 }
@@ -335,16 +400,16 @@ function vGroup(r) {
       <form class="form" data-form="profile">${profileFields(LS.get('name', ''), null)}
       <button class="btn primary">Los geht's</button></form></main>`;
   }
-  const today = L.dayKey();
-  const d = daily(v, today);
-  const extra = v.rounds.filter((x) => x.day === today).sort((a, b) => b.at - a.at);
+  const [main, ...rest] = dayRounds(v, L.dayKey());
   const s = myStreak(v);
+  const queued = queueOf(v).length;
   return `${bar}<main>${pendingBanner()}
     <div class="chips"><span class="chip">${s ? `🔥 ${s} ${s === 1 ? 'Tag' : 'Tage'} in Folge` : '🔥 Starte deine Serie'}</span>
+      ${queued ? `<a class="chip" href="#/g/${v.id}/fragen">📬 ${queued} in der Warteschlange</a>` : ''}
       ${v.members.length < 3 ? `<a class="chip accent" href="#/g/${v.id}/einladen">Freunde einladen</a>` : ''}</div>
-    ${d ? roundCard(v, d) : `<p class="empty">Keine Tagesfrage – aktiviere Fragenpakete in den <a href="#/g/${v.id}/gruppe">Gruppeneinstellungen</a>.</p>`}
-    ${extra.length ? `<h3 class="sect">Weitere Fragen heute</h3>${extra.map((x) => roundCard(v, x, { link: true })).join('')}` : ''}
-    <a class="btn ghost" href="#/g/${v.id}/fragen">${I.plus} Eigene Frage stellen</a>
+    ${main ? roundCard(v, main) : '<p class="empty">Heute gibt es keine Frage.</p>'}
+    ${rest.length ? `<h3 class="sect">Weitere Fragen heute</h3>${rest.map((x) => roundCard(v, x, { link: true })).join('')}` : ''}
+    <a class="btn ghost" href="#/g/${v.id}/fragen">${I.plus} Eigene Frage einreichen</a>
   </main>`;
 }
 
@@ -364,7 +429,7 @@ function vHistory(r) {
   let html = '';
   for (let n = today; n >= start; n--) {
     const key = L.keyFromNumber(n);
-    const rounds = [daily(v, key), ...v.rounds.filter((x) => x.day === key).sort((a, b) => b.at - a.at)].filter(Boolean);
+    const rounds = dayRounds(v, key);
     const rows = rounds
       .map((round) => {
         const q = questionOf(round);
@@ -389,7 +454,17 @@ function vAsk(r) {
     ['either', 'Auswahl', 'Eigene Antwortmöglichkeiten'],
     ['text', 'Freitext', 'Alle schreiben eine Antwort'],
   ];
-  return `${groupBar(v, `#/g/${v.id}`)}<main><h2 class="ptitle">Eigene Frage stellen</h2>
+  const queue = queueOf(v);
+  const mine = queue.filter((r) => r.by === store.pk);
+  const last = queue.at(-1)?.slot;
+  const next = L.keyFromNumber(Math.max(L.dayNumber(L.dayKey()) + 1, last ? L.dayNumber(last) + 1 : 0));
+  const queueHtml = `<h3 class="sect">Warteschlange</h3>
+    <p class="hint">${queue.length ? `${queue.length} ${queue.length === 1 ? 'Frage wartet' : 'Fragen warten'}. ` : ''}Eine neue Frage käme <b>${dateLabel(next)}</b> dran.</p>
+    ${mine.length ? `<div class="hlist">${mine
+      .map((r) => `<div class="hrow"><span class="htext"><small class="muted">${dateLabel(r.slot)}</small><br>${esc(r.q.text)}</span>
+        <button class="link" data-action="withdraw" data-rid="${r.rid}">Zurückziehen</button></div>`)
+      .join('')}</div>` : ''}`;
+  return `${groupBar(v, `#/g/${v.id}`)}<main><h2 class="ptitle">Eigene Frage einreichen</h2>
   <form class="form" data-form="ask">
     <fieldset class="types"><legend>Art der Frage</legend>${types
       .map(
@@ -402,9 +477,9 @@ function vAsk(r) {
     <div id="optfield" hidden><label>Antwortmöglichkeiten</label>
       <div id="optlist"><input name="opt" maxlength="60" placeholder="Option 1"><input name="opt" maxlength="60" placeholder="Option 2"></div>
       <button type="button" class="link" data-action="add-opt">+ weitere Option</button></div>
-    <p class="hint">Die Frage erscheint sofort bei allen in der Gruppe.</p>
-    <button class="btn primary">Frage stellen</button>
-  </form></main>`;
+    <p class="hint">Eigene Fragen kommen in eine Warteschlange: ab morgen jeden Tag eine, in der Reihenfolge, in der sie eingereicht wurden – zusätzlich zur Tagesfrage. Bis dahin sehen die anderen sie nicht.</p>
+    <button class="btn primary">Einreichen</button>
+  </form>${queueHtml}</main>`;
 }
 
 function vInvite(r) {
@@ -434,7 +509,8 @@ function vGroupSettings(r) {
     <form class="form" data-form="meta">
       <label for="gname">Name der Gruppe</label>
       <input id="gname" name="gname" required maxlength="40" value="${esc(v.meta.name)}">
-      <label>Fragenpakete für die Tagesfrage</label>${packPicker(v.meta.packs)}
+      <label>Fragenpakete</label>
+      <p class="hint">Jedes Paket stellt jeden Tag eine eigene Frage.</p>${packPicker(v.meta.packs)}
       <button class="btn">Speichern</button>
     </form>
     <h3 class="sect">Gruppe verlassen</h3>
@@ -455,6 +531,8 @@ function vDevice() {
       <ul class="relays">${status.map((s) => `<li><span class="dot ${s.ok ? 'ok' : ''}"></span>${esc(s.url)}</li>`).join('')}</ul>
       <div class="row"><button class="btn">Speichern</button><button type="button" class="btn ghost" data-action="reset-relays">Standard</button></div>
     </form>
+    <h3 class="sect">Benachrichtigungen</h3>
+    <div id="notify"><p class="hint">Prüfe …</p></div>
     <h3 class="sect">Auf neues Gerät umziehen</h3>
     <p class="hint">Überträgt deine Identität und alle Gruppen. Der Code ist wie ein Passwort – niemandem zeigen.</p>
     <button class="btn" data-action="transfer">${I.qr} Umzugs-Code anzeigen</button>
@@ -474,6 +552,35 @@ function vTransfer(code) {
 
 function vMissing() {
   return `${topbar(`<a class="ibtn" href="#/" aria-label="Zurück">${I.back}</a>`, '<h1>Nicht gefunden</h1>')}<main><p class="empty">Diese Gruppe ist auf diesem Gerät nicht gespeichert.</p></main>`;
+}
+
+// ---------- Benachrichtigungen (Android: Periodic Background Sync) ----------
+
+const canPeriodic = 'serviceWorker' in navigator && 'periodicSync' in (self.ServiceWorkerRegistration?.prototype || {});
+
+async function notifyState() {
+  if (!canPeriodic || !('Notification' in self)) return 'unsupported';
+  const reg = await navigator.serviceWorker.ready;
+  const tags = await reg.periodicSync.getTags().catch(() => []);
+  return tags.includes('fragerunde-check') && Notification.permission === 'granted' && (await store.notifyEnabled()) ? 'on' : 'off';
+}
+
+async function refreshNotify() {
+  const box = document.getElementById('notify');
+  if (!box) return;
+  const state = await notifyState();
+  box.innerHTML =
+    state === 'unsupported'
+      ? `<p class="hint">${
+          isIOS
+            ? 'Auf dem iPhone dürfen Web-Apps im Hintergrund nichts prüfen. Benachrichtigungen fürs iPhone kommen später per Web Push.'
+            : 'Dieser Browser kann nicht im Hintergrund prüfen. Am besten klappt es mit Chrome auf Android, wenn die App installiert ist.'
+        }</p>`
+      : state === 'on'
+        ? `<p class="hint">✓ Aktiv. Die App schaut ab und zu nach neuen Kommentaren und offenen Fragen des Tages (nicht zwischen 22 und 8 Uhr). Wie oft, entscheidet Android.</p>
+           <div class="row"><button class="btn" data-action="notify-test">Test</button><button class="btn ghost" data-action="notify-off">Ausschalten</button></div>`
+        : `<p class="hint">Lass dich an die Fragen des Tages und neue Kommentare erinnern. Funktioniert nur, wenn die App installiert ist (Menü → „Zum Startbildschirm hinzufügen“).</p>
+           <button class="btn" data-action="notify-on">🔔 Benachrichtigungen aktivieren</button>`;
 }
 
 // ---------- Routing & Zeichnen ----------
@@ -515,6 +622,7 @@ function render() {
   const html = (VIEWS[r.name] || vHome)(r);
   paint(html, changed);
   ui.lastRoute = location.hash;
+  if (r.name === 'device') refreshNotify();
 }
 
 // Neu zeichnen, ohne Eingaben, Fokus und Scrollposition zu verlieren.
@@ -556,7 +664,7 @@ const formData = (f) => Object.fromEntries(new FormData(f));
 const gidOf = () => parseRoute().gid;
 
 function dailyFields(round) {
-  return round.daily ? { qid: round.qid, subj: round.subj, day: round.day } : {};
+  return round.daily ? { qid: round.qid, subj: round.subj, day: round.day, pack: round.pack } : {};
 }
 
 const ACTIONS = {
@@ -568,11 +676,24 @@ const ACTIONS = {
     const rid = el.dataset.rid;
     const v = store.view(gidOf());
     const round = roundById(v, rid);
-    if (!round || ui.sel[rid] == null) return;
-    const choice = ui.sel[rid];
+    const mine = (v.votes.get(rid) || []).find((x) => x.by === store.pk);
+    const choice = ui.sel[rid] ?? mine?.data.choice;
+    if (!round || choice == null) return;
     delete ui.sel[rid];
     ui.edit = null;
+    // Gleiche Antwort wie vorher: nur schließen, nichts neu senden.
+    if (mine && mine.data.choice === choice) return rerenderKeepScroll();
     await store.vote(v.id, rid, { choice, ...dailyFields(round) });
+  },
+  async withdraw(el) {
+    if (!confirm('Frage aus der Warteschlange nehmen?')) return;
+    await store.withdraw(gidOf(), el.dataset.rid);
+    rerender();
+  },
+  'cancel-edit'(el) {
+    delete ui.sel[el.dataset.rid];
+    ui.edit = null;
+    rerenderKeepScroll();
   },
   edit(el) {
     ui.edit = el.dataset.rid;
@@ -605,6 +726,26 @@ const ACTIONS = {
     Object.assign(i, { name: 'opt', maxLength: 60, placeholder: `Option ${list.children.length + 1}`, required: true });
     list.append(i);
     i.focus();
+  },
+  async 'notify-on'() {
+    if ((await Notification.requestPermission()) !== 'granted') return toast('Benachrichtigungen wurden nicht erlaubt');
+    const reg = await navigator.serviceWorker.ready;
+    try {
+      await reg.periodicSync.register('fragerunde-check', { minInterval: 3 * 3600 * 1000 });
+    } catch {
+      return toast('Geht nur, wenn die App installiert ist');
+    }
+    await store.setNotify(true);
+    refreshNotify();
+  },
+  async 'notify-off'() {
+    const reg = await navigator.serviceWorker.ready;
+    await reg.periodicSync.unregister('fragerunde-check').catch(() => {});
+    await store.setNotify(false);
+    refreshNotify();
+  },
+  async 'notify-test'() {
+    (await navigator.serviceWorker.ready).active?.postMessage({ type: 'test' });
   },
   'reset-relays'() {
     document.getElementById('relays').value = DEFAULT_RELAYS.join('\n');
@@ -639,8 +780,7 @@ function rerenderKeepScroll() {
 const FORMS = {
   async new(f) {
     const d = formData(f);
-    const packs = new FormData(f).getAll('pack');
-    if (!packs.length) return toast('Bitte mindestens ein Paket wählen');
+    const packs = packsFrom(f);
     if (!LS.get('name')) LS.set('name', d.name.trim());
     const id = await store.createGroup({ name: d.gname.trim(), packs, profile: { name: d.name, emoji: d.emoji } });
     location.hash = `#/g/${id}/einladen`;
@@ -653,8 +793,7 @@ const FORMS = {
     if (parseRoute().name === 'group') rerender();
   },
   async meta(f) {
-    const packs = new FormData(f).getAll('pack');
-    if (!packs.length) return toast('Bitte mindestens ein Paket wählen');
+    const packs = packsFrom(f);
     await store.setMeta(gidOf(), { name: formData(f).gname.trim(), packs });
     toast('Gespeichert');
   },
@@ -665,6 +804,8 @@ const FORMS = {
     const text = formData(f).text.trim();
     if (!round || !text) return;
     ui.edit = null;
+    const mine = (v.votes.get(rid) || []).find((x) => x.by === store.pk);
+    if (mine && mine.data.text === text.slice(0, 300)) return rerenderKeepScroll();
     await store.vote(v.id, rid, { text: text.slice(0, 300), ...dailyFields(round) });
   },
   async comment(f) {
@@ -684,7 +825,9 @@ const FORMS = {
     }
     const gid = gidOf();
     const rid = await store.ask(gid, q);
-    location.hash = `#/g/${gid}/r/${rid}`;
+    const slot = schedule(store.view(gid)).get(rid);
+    toast(`Eingereiht – kommt ${dateLabel(slot)} dran`);
+    location.hash = `#/g/${gid}`;
   },
   device(f) {
     const d = formData(f);
@@ -799,9 +942,13 @@ setInterval(() => {
   }
 }, 30000);
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js');
 }
+
+const clearBadge = () => navigator.clearAppBadge?.().catch(() => {});
+clearBadge();
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && clearBadge());
 
 render();
 store.init().then(render);

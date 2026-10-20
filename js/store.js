@@ -87,25 +87,37 @@ export function parseInvite(s) {
   return m ? { id: m[1], key: m[2] } : null;
 }
 
-// Minimaler IndexedDB-Cache: pro Gruppe die Liste der rohen Events.
+// Minimaler IndexedDB-Cache. 'groups': pro Gruppe die rohen Events,
+// 'kv': was der Service Worker für den Hintergrund-Check braucht.
+// Schema muss zu js/bg.js passen.
 const idb = {
   _db: null,
   open() {
     if (this._db) return this._db;
     this._db = new Promise((res, rej) => {
-      const r = indexedDB.open('fragerunde', 1);
-      r.onupgradeneeded = () => r.result.createObjectStore('groups');
-      r.onsuccess = () => res(r.result);
+      const r = indexedDB.open('fragerunde', 2);
+      r.onupgradeneeded = () => {
+        for (const name of ['groups', 'kv']) {
+          if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name);
+        }
+      };
+      r.onsuccess = () => {
+        r.result.onversionchange = () => {
+          r.result.close();
+          this._db = null;
+        };
+        res(r.result);
+      };
       r.onerror = () => rej(r.error);
     });
     return this._db;
   },
-  async tx(mode, fn) {
+  async tx(store, mode, fn) {
     try {
       const db = await this.open();
       return await new Promise((res, rej) => {
-        const t = db.transaction('groups', mode);
-        const req = fn(t.objectStore('groups'));
+        const t = db.transaction(store, mode);
+        const req = fn(t.objectStore(store));
         t.oncomplete = () => res(req?.result);
         t.onerror = () => rej(t.error);
       });
@@ -113,9 +125,14 @@ const idb = {
       return undefined;
     }
   },
-  get: (id) => idb.tx('readonly', (s) => s.get(id)),
-  put: (id, v) => idb.tx('readwrite', (s) => s.put(v, id)),
-  del: (id) => idb.tx('readwrite', (s) => s.delete(id)),
+  get: (id) => idb.tx('groups', 'readonly', (s) => s.get(id)),
+  put: (id, v) => idb.tx('groups', 'readwrite', (s) => s.put(v, id)),
+  del: (id) => idb.tx('groups', 'readwrite', (s) => s.delete(id)),
+};
+
+export const kv = {
+  get: (k) => idb.tx('kv', 'readonly', (s) => s.get(k)),
+  set: (k, v) => idb.tx('kv', 'readwrite', (s) => s.put(v, k)),
 };
 
 export class Store extends EventTarget {
@@ -138,7 +155,11 @@ export class Store extends EventTarget {
 
   async init() {
     navigator.storage?.persist?.();
+    kv.set('pk', this.pk);
+    kv.set('relays', this.relays);
+    kv.set('groups', LS.get('groups', []));
     for (const g of LS.get('groups', [])) await this._open(g.id, g.key);
+    this.ready = true;
     this.flush();
     setInterval(() => this.flush(), 30000);
     addEventListener('online', () => this.resync());
@@ -149,11 +170,28 @@ export class Store extends EventTarget {
 
   _changed() {
     clearTimeout(this._timers.change);
-    this._timers.change = setTimeout(() => this.dispatchEvent(new Event('change')), 40);
+    this._timers.change = setTimeout(() => {
+      this.dispatchEvent(new Event('change'));
+      // Was hier offen sichtbar war, muss der Hintergrund-Check nicht melden.
+      if (document.visibilityState === 'visible') {
+        for (const g of this.groups.values()) if (g.latest) kv.set('seen:' + g.id, g.latest);
+      }
+    }, 40);
   }
 
   _saveList() {
-    LS.set('groups', [...this.groups.values()].map((g) => ({ id: g.id, key: g.keyB64 })));
+    const list = [...this.groups.values()].map((g) => ({ id: g.id, key: g.keyB64 }));
+    LS.set('groups', list);
+    kv.set('groups', list);
+  }
+
+  async setNotify(on) {
+    if (on) for (const g of this.groups.values()) await kv.set('seen:' + g.id, g.latest || Math.floor(Date.now() / 1000));
+    await kv.set('notify', on);
+  }
+
+  notifyEnabled() {
+    return kv.get('notify').then(Boolean);
   }
 
   async _open(id, keyB64) {
@@ -336,6 +374,13 @@ export class Store extends EventTarget {
     return rid;
   }
 
+  withdraw(gid, rid) {
+    const own = this.view(gid).rounds.find((r) => r.rid === rid && r.by === this.pk);
+    if (!own) return;
+    const { by, at, ...data } = own;
+    return this._publish(gid, 'r:' + rid, { ...data, withdrawn: true });
+  }
+
   comment(gid, rid, text) {
     return this._publish(gid, 'c:' + randomId(6), { type: 'comment', rid, text: text.trim().slice(0, 500) });
   }
@@ -357,6 +402,7 @@ export class Store extends EventTarget {
   setRelays(list) {
     this.relays = list;
     LS.set('relays', list);
+    kv.set('relays', list);
     this.resync();
   }
 

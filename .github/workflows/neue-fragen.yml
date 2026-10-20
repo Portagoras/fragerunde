@@ -1,0 +1,74 @@
+# Alle 100 Tage neue Fragen mit Copilot (auch Copilot Free) erzeugen und als
+# Pull Request zur Durchsicht vorschlagen. GitHub kann "alle 100 Tage" nicht
+# direkt planen – der Job läuft deshalb jeden Montag und prüft selbst, ob seit
+# der letzten Erzeugung (.github/fragen-state.json) 100 Tage vergangen sind.
+# Von Hand gestartet (Actions → Neue Fragen → Run workflow) läuft er sofort.
+
+name: Neue Fragen
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  copilot-requests: write
+
+concurrency: neue-fragen
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sind 100 Tage um?
+        id: due
+        run: |
+          last=$(jq -r .last .github/fragen-state.json)
+          days=$(( ( $(date +%s) - $(date -d "$last" +%s) ) / 86400 ))
+          echo "Letzte Erzeugung: $last (vor $days Tagen)"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "$days" -ge 100 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.due.outputs.run == 'true'
+        with:
+          node-version: 22
+
+      - name: Copilot CLI installieren
+        if: steps.due.outputs.run == 'true'
+        run: npm install -g @github/copilot
+
+      - name: Fragen erzeugen
+        if: steps.due.outputs.run == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # Optional: Personal Access Token mit "Copilot Requests"-Recht, falls
+          # die Anmeldung über GITHUB_TOKEN nicht klappt.
+          COPILOT_PAT: ${{ secrets.COPILOT_PAT }}
+        run: |
+          if [ -n "$COPILOT_PAT" ]; then export COPILOT_GITHUB_TOKEN="$COPILOT_PAT"; fi
+          node scripts/generate-questions.mjs --per-pack 10
+
+      - name: Tests
+        if: steps.due.outputs.run == 'true'
+        run: npm test
+
+      - name: Pull Request öffnen
+        if: steps.due.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="neue-fragen-$(date +%F)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add js/questions-generated.js .github/fragen-state.json
+          git commit -m "Neue Fragen ($(date +%F))"
+          git push origin "$branch"
+          gh pr create --title "Neue Fragen ($(date +%F))" --body-file generated-summary.md
+          cat generated-summary.md >> "$GITHUB_STEP_SUMMARY"

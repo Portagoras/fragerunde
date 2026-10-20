@@ -22,36 +22,41 @@ test('Katalog: eindeutige IDs, gültige Typen, Platzhalter nur wo erlaubt', () =
   assert.ok(CATALOG.length > 150);
 });
 
+const day0 = L.dayNumber(meta.start);
+const keyAt = (i) => L.keyFromNumber(day0 + i);
+const qOf = (r) => CATALOG.find((x) => x.id === r.qid);
+
 test('Tagesfrage ist deterministisch und unabhängig von der Reihenfolge der Mitglieder', () => {
-  const a = L.dailyRound(meta, members, '2026-10-20', CATALOG);
-  const b = L.dailyRound(meta, [...members].reverse(), '2026-10-20', CATALOG);
+  const a = L.dailyRound(meta, members, '2026-10-20', CATALOG, 'klassiker');
+  const b = L.dailyRound(meta, [...members].reverse(), '2026-10-20', CATALOG, 'klassiker');
   assert.deepEqual(a, b);
-  assert.equal(a.rid, 'd2026-10-20');
+  assert.equal(a.rid, 'd2026-10-20:klassiker');
+  assert.equal(qOf(a).pack, 'klassiker');
 });
 
-test('Innerhalb eines Durchlaufs wiederholt sich keine Frage', () => {
-  const seen = new Set();
-  const start = L.dayNumber(meta.start);
-  for (let i = 0; i < CATALOG.length; i++) {
-    const r = L.dailyRound(meta, members, L.keyFromNumber(start + i), CATALOG);
-    assert.ok(!seen.has(r.qid), `Wiederholung an Tag ${i}: ${r.qid}`);
-    seen.add(r.qid);
+test('Jedes Paket hat seinen eigenen Rhythmus ohne Wiederholung im Durchlauf', () => {
+  for (const { id } of PACKS) {
+    const size = CATALOG.filter((q) => q.pack === id).length;
+    const seen = new Set();
+    for (let i = 0; i < size; i++) {
+      const r = L.dailyRound(meta, members, keyAt(i), CATALOG, id);
+      assert.equal(qOf(r).pack, id);
+      assert.ok(!seen.has(r.qid), `${id}: Wiederholung an Tag ${i}`);
+      seen.add(r.qid);
+    }
   }
 });
 
 test('Gruppen mit anderem Seed bekommen eine andere Reihenfolge', () => {
-  const days = [...Array(10)].map((_, i) => L.keyFromNumber(L.dayNumber(meta.start) + i));
-  const q1 = days.map((k) => L.dailyRound(meta, members, k, CATALOG).qid);
-  const q2 = days.map((k) => L.dailyRound({ ...meta, seed: 'other' }, members, k, CATALOG).qid);
+  const q1 = [...Array(10)].map((_, i) => L.dailyRound(meta, members, keyAt(i), CATALOG, 'klassiker').qid);
+  const q2 = [...Array(10)].map((_, i) => L.dailyRound({ ...meta, seed: 'other' }, members, keyAt(i), CATALOG, 'klassiker').qid);
   assert.notDeepEqual(q1, q2);
 });
 
 test('Platzhalter: zwei verschiedene Personen, nur Mitglieder', () => {
-  const start = L.dayNumber(meta.start);
-  for (let i = 0; i < 400; i++) {
-    const r = L.dailyRound(meta, members, L.keyFromNumber(start + i), CATALOG);
-    const q = CATALOG.find((x) => x.id === r.qid);
-    const need = L.needs(q.text);
+  for (let i = 0; i < 100; i++) {
+    const r = L.dailyRound(meta, members, keyAt(i), CATALOG, 'geschichten');
+    const need = L.needs(qOf(r).text);
     assert.equal(r.subj.length, (need.a ? 1 : 0) + (need.b ? 1 : 0));
     if (need.b) assert.notEqual(r.subj[0], r.subj[1]);
     for (const pk of r.subj) assert.ok(members.some((m) => m.pk === pk));
@@ -59,16 +64,31 @@ test('Platzhalter: zwei verschiedene Personen, nur Mitglieder', () => {
 });
 
 test('Mit nur einer Person keine {B}-Fragen', () => {
-  const start = L.dayNumber(meta.start);
-  for (let i = 0; i < 200; i++) {
-    const r = L.dailyRound(meta, members.slice(0, 1), L.keyFromNumber(start + i), CATALOG);
-    const q = CATALOG.find((x) => x.id === r.qid);
-    assert.ok(!q.text.includes('{B}'));
+  for (let i = 0; i < 100; i++) {
+    const r = L.dailyRound(meta, members.slice(0, 1), keyAt(i), CATALOG, 'geschichten');
+    assert.ok(!qOf(r).text.includes('{B}'));
   }
 });
 
+test('Eigene Fragen: FIFO, ab dem nächsten Tag, eine pro Tag', () => {
+  const rounds = [
+    { rid: 'c3', at: 300, day: '2026-10-20' },
+    { rid: 'c1', at: 100, day: '2026-10-20' },
+    { rid: 'c2', at: 200, day: '2026-10-20' },
+    { rid: 'cx', at: 150, day: '2026-10-20', withdrawn: true },
+    { rid: 'c4', at: 900, day: '2026-10-30' },
+  ];
+  const s = L.scheduleCustom(rounds);
+  assert.deepEqual([...s.entries()], [
+    ['c1', '2026-10-21'],
+    ['c2', '2026-10-22'],
+    ['c3', '2026-10-23'],
+    ['c4', '2026-10-31'],
+  ]);
+});
+
 test('Erste Stimme friert die Tagesfrage ein', () => {
-  const r = L.dailyRound(meta, members, '2026-10-20', CATALOG);
+  const r = L.dailyRound(meta, members, '2026-10-20', CATALOG, 'klassiker');
   const votes = [
     { by: 'bb', at: 200, data: { qid: 'x-2', subj: ['cc'] } },
     { by: 'aa', at: 100, data: { qid: 'x-1', subj: ['aa'] } },

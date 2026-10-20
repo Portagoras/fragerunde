@@ -58,14 +58,14 @@ export function shuffled(arr, seedStr) {
 
 export const needs = (text) => ({ a: text.includes('{A}'), b: text.includes('{B}') });
 
-// Die Tagesfrage einer Gruppe wird von allen Geräten gleich berechnet –
-// ohne Server. Jede Gruppe hat ihre eigene, gemischte Reihenfolge.
-// Sobald jemand abgestimmt hat, gilt die Frage aus dieser Stimme (siehe
-// frozenDaily), damit sich nichts mehr verschiebt, wenn Leute beitreten
-// oder Fragenpakete geändert werden.
-export function dailyRound(meta, members, key, catalog) {
+// Jedes Paket stellt pro Tag eine Frage. Alle Geräte berechnen sie gleich –
+// ohne Server. Jede Gruppe und jedes Paket hat eine eigene, gemischte
+// Reihenfolge. Sobald jemand abgestimmt hat, gilt die Frage aus dieser
+// Stimme (siehe frozenDaily), damit sich nichts mehr verschiebt, wenn Leute
+// beitreten oder neue Fragen in den Katalog kommen.
+export function dailyRound(meta, members, key, catalog, pack) {
   const pool = catalog
-    .filter((q) => meta.packs.includes(q.pack))
+    .filter((q) => q.pack === pack)
     .sort((x, y) => (x.id < y.id ? -1 : 1));
   if (!pool.length) return null;
 
@@ -78,15 +78,15 @@ export function dailyRound(meta, members, key, catalog) {
   let n = Math.max(0, dayNumber(key) - dayNumber(meta.start));
   for (let tries = 0; tries < pool.length; tries++, n++) {
     const cycle = Math.floor(n / pool.length);
-    const q = shuffled(pool, `${meta.seed}:${cycle}`)[n % pool.length];
+    const q = shuffled(pool, `${meta.seed}:${pack}:${cycle}`)[n % pool.length];
     const need = needs(q.text);
     if ((need.b && people.length < 2) || (need.a && people.length < 1)) continue;
-    const r = rng(hash(`${meta.seed}:${key}:subj`));
+    const r = rng(hash(`${meta.seed}:${key}:${pack}:subj`));
     const left = [...people];
     const subj = [];
     if (need.a) subj.push(left.splice(Math.floor(r() * left.length), 1)[0].pk);
     if (need.b) subj.push(left.splice(Math.floor(r() * left.length), 1)[0].pk);
-    return { rid: 'd' + key, day: key, daily: true, qid: q.id, subj };
+    return { rid: `d${key}:${pack}`, day: key, daily: true, pack, qid: q.id, subj };
   }
   return null;
 }
@@ -98,6 +98,23 @@ export function frozenDaily(round, votes) {
     .sort((x, y) => x.at - y.at || (x.by < y.by ? -1 : 1))[0];
   if (!first) return round;
   return { ...round, qid: first.data.qid, subj: first.data.subj || [] };
+}
+
+// Eigene Fragen der Gruppe: Warteschlange nach Einreichungszeit (FIFO).
+// Frühestens am Tag nach dem Einreichen, höchstens eine pro Tag.
+// Ergebnis: Map rid -> Tag, an dem die Frage gestellt wird.
+export function scheduleCustom(rounds) {
+  const queue = rounds
+    .filter((r) => !r.withdrawn)
+    .sort((x, y) => x.at - y.at || (x.rid < y.rid ? -1 : 1));
+  const slots = new Map();
+  let next = -Infinity;
+  for (const r of queue) {
+    const n = Math.max(next, dayNumber(r.day) + 1);
+    slots.set(r.rid, keyFromNumber(n));
+    next = n + 1;
+  }
+  return slots;
 }
 
 export const TYPE_LABEL = {

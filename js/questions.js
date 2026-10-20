@@ -8,8 +8,10 @@
 //   either – Auswahl aus festen Optionen
 //   text   – freie Antwort, {A} wird durch ein Mitglied ersetzt
 
+import GENERATED from './questions-generated.js';
+
 export const PACKS = [
-  { id: 'klassiker', name: 'Klassiker', emoji: '⭐', desc: 'Wer würde am ehesten …' },
+  { id: 'klassiker', name: 'Klassiker', emoji: '⭐', desc: 'Die Tagesfrage: Wer würde am ehesten …' },
   { id: 'geschichten', name: 'Geschichten', emoji: '📖', desc: 'Fragen über einzelne Leute aus der Gruppe' },
   { id: 'entweder', name: 'Entweder oder', emoji: '⚖️', desc: 'Pizza oder Burger?' },
   { id: 'niemals', name: 'Ich hab noch nie', emoji: '🙊', desc: 'Wer hat schon, wer noch nie?' },
@@ -18,7 +20,10 @@ export const PACKS = [
   { id: 'tiefgang', name: 'Tiefgang', emoji: '💛', desc: 'Ehrliche Fragen für gute Freunde' },
 ];
 
-export const DEFAULT_PACKS = ['klassiker', 'geschichten', 'entweder', 'niemals'];
+// Die Tagesfrage kommt immer aus diesem Paket, die anderen sind Zusatzpakete
+// mit je einer eigenen Frage pro Tag.
+export const MAIN_PACK = 'klassiker';
+export const DEFAULT_PACKS = ['klassiker', 'geschichten', 'entweder'];
 
 const who = (text) => ({ type: 'who', text });
 const yesno = (text) => ({ type: 'yesno', text });
@@ -223,9 +228,14 @@ const RAW = {
   ],
 };
 
-export const CATALOG = Object.entries(RAW).flatMap(([pack, list]) =>
-  list.map((q, i) => ({ ...q, pack, id: `${pack}-${String(i + 1).padStart(3, '0')}` })),
-);
+// Von Hand geschriebene Fragen bekommen ihre ID aus der Position, die von
+// der GitHub Action erzeugten (questions-generated.js) bringen eine eigene mit.
+export const CATALOG = [
+  ...Object.entries(RAW).flatMap(([pack, list]) =>
+    list.map((q, i) => ({ ...q, pack, id: `${pack}-${String(i + 1).padStart(3, '0')}` })),
+  ),
+  ...GENERATED.filter((q) => RAW[q.pack] && q.id && q.text),
+];
 
 const BY_ID = new Map(CATALOG.map((q) => [q.id, q]));
 export const questionById = (id) => BY_ID.get(id);
