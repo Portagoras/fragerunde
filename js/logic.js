@@ -133,9 +133,9 @@ export function optionsFor(q, members) {
     case 'yesno':
       return [{ value: '0', label: 'Ja' }, { value: '1', label: 'Nein' }];
     case 'never':
-      return [{ value: '0', label: 'Hab ich schon 🙋' }, { value: '1', label: 'Noch nie 😇' }];
+      return [{ value: '0', label: 'Hab ich schon' }, { value: '1', label: 'Noch nie' }];
     case 'secret':
-      return [{ value: '0', label: 'Ja 🙈' }, { value: '1', label: 'Nein 😇' }];
+      return [{ value: '0', label: 'Ja' }, { value: '1', label: 'Nein' }];
     case 'either':
       return (q.options || []).map((o, i) => ({ value: String(i), label: o }));
     default:

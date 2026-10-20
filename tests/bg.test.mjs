@@ -28,11 +28,11 @@ test('Nachricht nennt Kommentar und offene Tagesfragen', () => {
   const { comments } = FR.summarize(items, { me: 'me', after: 60 });
   const m = FR.message({ name: 'Die Chaoten', comments, daily: true, names });
   assert.equal(m.title, 'Die Chaoten');
-  assert.equal(m.body, '💬 Lisa: Bin dabei!\n🔥 Die Fragen von heute warten auf dich');
+  assert.equal(m.body, 'Lisa: Bin dabei!\nDie Fragen von heute warten auf dich.');
 });
 
 test('Mehrere Kommentare werden zusammengefasst, nichts Neues ergibt keine Nachricht', () => {
   const c = [1, 2, 3].map((i) => ({ by: 'lisa', at: i, data: { text: 't' } }));
-  assert.equal(FR.message({ name: 'G', comments: c, daily: false, names }).body, '💬 3 neue Kommentare');
+  assert.equal(FR.message({ name: 'G', comments: c, daily: false, names }).body, '3 neue Kommentare');
   assert.equal(FR.message({ name: 'G', comments: [], daily: false, names }), null);
 });

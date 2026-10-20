@@ -1,6 +1,6 @@
 // Service Worker: Offline-Fähigkeit und Hintergrund-Check (js/bg.js).
 // Bei jeder Veröffentlichung VERSION erhöhen.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = 'fragerunde-' + VERSION;
 const ASSETS = [
   './',
@@ -16,6 +16,8 @@ const ASSETS = [
   'vendor/nostr.bundle.js',
   'vendor/qrcode.js',
   'vendor/jsQR.js',
+  'fonts/young-serif.woff2',
+  'fonts/schibsted-grotesk.woff2',
   'icons/icon.svg',
   'icons/icon-180.png',
   'icons/icon-192.png',

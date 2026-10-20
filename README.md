@@ -1,5 +1,7 @@
 # Fragerunde
 
+> **Hinweis: KI-generiert.** Der gesamte Code, die Gestaltung, die Texte, die Fragen, die Icons und diese Dokumentation wurden mit KI erzeugt: mit Claude von Anthropic (über Claude Code), neue Fragen per GitHub Action mit GitHub Copilot. Ein Mensch hat die Anforderungen und die Richtung vorgegeben, aber nicht jede Zeile geprüft. Bitte entsprechend kritisch lesen und benutzen.
+
 Jeden Tag eine Frage für deine Freundesgruppe – „Wer würde am ehesten …?", „Ich hab noch nie …", Entweder-oder und Fragen über einzelne Leute aus der Gruppe. Alle stimmen ab, danach sieht man, wer wen gewählt hat, und kann darüber diskutieren.
 
 Freie Alternative zu kommerziellen „Wer würde eher"-Apps: **kein Konto, keine Werbung, keine In-App-Käufe, kein eigener Server.**
@@ -63,6 +65,7 @@ Aufbau:
 | `scripts/generate-questions.mjs` | Fragen mit der Copilot CLI erzeugen und prüfen (`--mock` zum Ausprobieren) |
 | `.github/workflows/neue-fragen.yml` | Tagesfragen alle 100 Tage, Zusatzpakete auf Abruf – als Pull Request |
 | `sw.js` | Service Worker. Bei jeder Veröffentlichung `VERSION` erhöhen. |
+| `fonts/` | Young Serif und Schibsted Grotesk (beide SIL Open Font License), selbst gehostet statt über Google Fonts |
 | `vendor/` | nostr-tools 2.25.2 (Unlicense), qrcode-generator 1.4.4 (MIT), jsQR 1.4.0 (Apache-2.0) |
 
 ## Veröffentlichen mit GitHub Pages

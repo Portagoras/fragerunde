@@ -13,7 +13,7 @@ const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const EMOJIS = ['😎', '🦊', '🐸', '🐼', '🦄', '🐙', '🌵', '🍕', '🎸', '🚀', '👾', '🐝', '🦖', '🍉', '⚡', '🌈', '🐧', '🎩', '🐻', '🌻', '🦉', '🍩', '🎮', '🐨'];
-const COLORS = ['#f4a63a', '#ef6f6c', '#8b6cf6', '#33b0a6', '#4f9cf0', '#e46fb8', '#7cc35f', '#e8b923'];
+const COLORS = ['#e8593c', '#f0c04f', '#9cc2e2', '#ee97ba', '#86ad70', '#d9b38c', '#b9a6d6', '#7fc4b8'];
 const color = (pk) => COLORS[L.hash(pk) % COLORS.length];
 
 const svg = (p) =>
@@ -29,6 +29,27 @@ const I = {
   send: svg('<path d="M4 12l16-8-6 16-2-7-8-1z"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
 };
+
+// Jedes Paket hat ein eigenes Zeichen – wie die Farben eines Kartenspiels.
+const SUITS = {
+  klassiker: '<circle cx="12" cy="12" r="8.5"/>',
+  geschichten: '<path d="M12 3.2 21 19.6H3z"/>',
+  entweder: '<rect x="4.2" y="4.2" width="15.6" height="15.6"/>',
+  niemals: '<path d="M12 2.4 21.6 12 12 21.6 2.4 12z"/>',
+  party: '<path d="m12 2.6 2.7 6.1 6.6.6-5 4.4 1.5 6.5L12 16.8l-5.8 3.4 1.5-6.5-5-4.4 6.6-.6z"/>',
+  frech: '<path d="M13.6 2 4.8 13.6h6.1L10 22l9.2-12.6H13z"/>',
+  tiefgang: '<path d="M12 20.6S3 15.1 3 8.9C3 6.1 5.1 4 7.7 4c1.8 0 3.3 1 4.3 2.6C13 5 14.5 4 16.3 4 18.9 4 21 6.1 21 8.9c0 6.2-9 11.7-9 11.7z"/>',
+  unteruns: '<path d="M12.3 2.2c.4 3.2 4.9 5.4 5.5 10.6a5.8 5.8 0 0 1-11.6.4c0-2.4 1-3.8 2.1-5.2.2 1.7 1 2.6 1.9 3-.5-3.3.3-6.2 2.1-8.8z"/>',
+  custom: '<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="3"/>',
+};
+const suit = (pack) => `<svg class="suit" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${SUITS[pack] || SUITS.custom}</svg>`;
+const packOf = (round) => (round.daily ? round.pack : 'custom');
+
+// Kartennummer aus der Fragen-ID: "klassiker-017" -> 17, "klassiker-g003" -> G3
+function cardNo(qid) {
+  const n = String(qid || '').split('-').pop();
+  return n.startsWith('g') ? 'G' + Number(n.slice(1)) : String(Number(n));
+}
 
 const avatar = (m, cls = '') =>
   `<span class="av ${cls}" style="--c:${color(m.pk)}" title="${esc(m.name)}">${esc(m.emoji || '🙂')}</span>`;
@@ -48,8 +69,8 @@ function packPicker(selected) {
   return `<div class="packs">${PACKS.map((p) => {
     const n = CATALOG.filter((q) => q.pack === p.id).length;
     const main = p.id === MAIN_PACK;
-    return `<label class="pack"><input type="checkbox" name="pack" value="${p.id}" ${main || selected.includes(p.id) ? 'checked' : ''} ${main ? 'disabled' : ''}>
-      <span class="pemoji">${p.emoji}</span><span class="ptext"><b>${esc(p.name)}${main ? ' · immer dabei' : ''}${p.adult ? ' <span class="badge">18+</span>' : ''}</b><small>${esc(p.desc)} · ${n} Fragen</small></span></label>`;
+    return `<label class="pack" data-pack="${p.id}"><input type="checkbox" name="pack" value="${p.id}" ${main || selected.includes(p.id) ? 'checked' : ''} ${main ? 'disabled' : ''}>
+      <span class="suit-chip">${suit(p.id)}</span><span class="ptext"><b>${esc(p.name)}${main ? ' · immer dabei' : ''}${p.adult ? '<span class="badge">18+</span>' : ''}</b><small>${esc(p.desc)} · ${n} Fragen</small></span><span class="check" aria-hidden="true"></span></label>`;
   }).join('')}</div>`;
 }
 
@@ -225,7 +246,7 @@ function myStreak(v) {
 
 function pendingBanner() {
   const n = store.pending();
-  return n ? `<div class="banner">⏳ ${n} ${n === 1 ? 'Änderung wartet' : 'Änderungen warten'} auf Verbindung …</div>` : '';
+  return n ? `<div class="banner">Offline – ${n} ${n === 1 ? 'Änderung wird' : 'Änderungen werden'} gesendet, sobald wieder Verbindung da ist.</div>` : '';
 }
 
 function topbar(left, title, right = '') {
@@ -235,7 +256,7 @@ function topbar(left, title, right = '') {
 function groupBar(v, back = '#/') {
   return topbar(
     `<a class="ibtn" href="${back}" aria-label="Zurück">${I.back}</a>`,
-    `<a class="gtitle" href="#/g/${v.id}/gruppe">${stack(v.members)}<span>${esc(v.meta?.name || 'Gruppe')}</span></a>`,
+    `<a class="gtitle" href="#/g/${v.id}/gruppe">${stack(v.members, 3)}<span>${esc(v.meta?.name || 'Gruppe')}</span></a>`,
     `<a class="ibtn" href="#/g/${v.id}/verlauf" aria-label="Verlauf">${I.history}</a>
      <a class="ibtn" href="#/g/${v.id}/fragen" aria-label="Eigene Frage stellen">${I.plus}</a>
      <a class="ibtn" href="#/g/${v.id}/gruppe" aria-label="Gruppe & Einladen">${I.gear}</a>`,
@@ -248,19 +269,26 @@ function roundCard(v, round, { link = false } = {}) {
   const votes = v.votes.get(round.rid) || [];
   const mine = votes.find((x) => x.by === store.pk);
   const total = v.members.length;
-  const pack = PACKS.find((p) => p.id === round.pack);
-  const from = !round.daily
-    ? `Frage von ${esc(personOf(v, round.by).name)} · ${L.TYPE_LABEL[q.type] || ''}`
+  const pack = packOf(round);
+  const kind = !round.daily
+    ? `Frage von ${esc(personOf(v, round.by).name)}`
     : round.pack === MAIN_PACK
-      ? `Frage des Tages · ${L.TYPE_LABEL[q.type] || ''}`
-      : `${pack?.emoji || ''} ${esc(pack?.name || '')}`;
-  const head = `<div class="qpanel"><span class="qtype">${from}</span><h2>${fill(q.text, v, round.subj)}</h2></div>`;
+      ? 'Tagesfrage'
+      : esc(PACKS.find((p) => p.id === round.pack)?.name || '');
+  // Jede Karte liegt ein bisschen anders schief auf dem Tisch.
+  const tilt = ((L.hash(round.rid) % 25) - 12) / 10;
+  const tag = link ? 'a' : 'div';
+  const face = `<${tag} class="face" data-pack="${pack}" style="--tilt:${tilt}deg"${link ? ` href="#/g/${v.id}/r/${round.rid}"` : ''}>
+      <div class="face-top">${suit(pack)}<span>${kind}</span>${round.daily ? `<span class="no">Nr. ${cardNo(round.qid)}</span>` : ''}</div>
+      <h2 class="q">${fill(q.text, v, round.subj)}</h2>
+      <div class="face-foot"><span>${L.TYPE_LABEL[q.type] || ''}</span><span class="kind"></span>${suit(pack)}</div>
+    </${tag}>`;
   const showResults = mine && ui.edit !== round.rid;
   const body = showResults ? results(v, round, q, votes) : answerForm(v, round, q, votes, mine);
-  return `<section class="card round">
-    ${link ? `<a class="qlink" href="#/g/${v.id}/r/${round.rid}">${head}</a>` : head}
-    <div class="cbody"><p class="count">${votes.length} von ${total} ${total === 1 ? 'hat' : 'haben'} geantwortet</p>${body}</div>
-    ${link ? (mine ? `<a class="disc-link" href="#/g/${v.id}/r/${round.rid}">💬 Diskussion${(v.comments.get(round.rid) || []).length ? ` (${v.comments.get(round.rid).length})` : ''} →</a>` : '') : discussion(v, round, !!mine)}
+  const ncom = (v.comments.get(round.rid) || []).length;
+  return `<section class="round">${face}
+    <p class="count">${votes.length} von ${total} ${total === 1 ? 'hat' : 'haben'} geantwortet</p>${body}
+    ${link ? (mine ? `<a class="disc-link" href="#/g/${v.id}/r/${round.rid}">Zur Diskussion${ncom ? ` (${ncom})` : ''}</a>` : '') : discussion(v, round, !!mine)}
   </section>`;
 }
 
@@ -277,7 +305,7 @@ function answerForm(v, round, q, votes, mine) {
   if (q.type === 'secret') {
     const total = v.members.length;
     const guess = ui.guess[rid] ?? mine?.data.guess ?? Math.round(total / 2);
-    return `<p class="hint center">🔒 Anonym: Niemand sieht, was du antwortest.</p>
+    return `<p class="hint">Anonym – niemand sieht, was du antwortest.</p>
     <div class="opts">${opts
       .map((o) => `<button type="button" class="opt ${sel === o.value ? 'on' : ''}" data-action="pick" data-rid="${rid}" data-value="${o.value}" aria-pressed="${sel === o.value}"><span>${esc(o.label)}</span></button>`)
       .join('')}</div>
@@ -307,18 +335,19 @@ function results(v, round, q, votes) {
     const pct = r.total ? Math.round((r.yes / r.total) * 100) : 0;
     const coming = Math.max(0, votes.length - answers.length);
     return `<div class="secret">
-      <div class="big">🌶️ ${r.yes} von ${r.total} ${r.yes === 1 ? 'sagt' : 'sagen'} Ja</div>
+      <p class="big">${r.yes} von ${r.total} ${r.yes === 1 ? 'sagt' : 'sagen'} Ja.</p>
       <div class="meter" role="img" aria-label="${pct} Prozent Ja"><span style="width:${pct}%"></span></div>
-      ${coming ? `<small class="muted">${coming} anonyme ${coming === 1 ? 'Antwort ist' : 'Antworten sind'} noch unterwegs …</small>` : ''}
+      ${coming ? `<p class="hint">${coming} anonyme ${coming === 1 ? 'Antwort ist' : 'Antworten sind'} noch unterwegs.</p>` : ''}
     </div>
-    <h4 class="sub">Tipps</h4>
+    <h4 class="sub">Wer hat was getippt?</h4>
     <ul class="guesses">${r.ranked
       .map((g) => {
         const m = personOf(v, g.by);
-        return `<li class="${g.best ? 'best' : ''}">${avatar(m, 'sm')}<span>${esc(m.name)}</span><b>${g.guess}</b>${g.best ? '<span aria-label="am nächsten dran">🎯</span>' : ''}</li>`;
+        const hit = g.off === 0 ? 'Volltreffer' : g.best ? 'am nächsten dran' : '';
+        return `<li>${avatar(m, 'sm')}<span>${esc(m.name)}</span>${hit ? `<span class="hit">${hit}</span>` : ''}<b>${g.guess}</b></li>`;
       })
       .join('')}</ul>
-    <p class="hint center">🔒 In der App sieht niemand, wer was geantwortet hat.</p>${again}`;
+    <p class="hint">Wer was geantwortet hat, sieht in der App niemand.</p>${again}`;
   }
   if (q.type === 'text') {
     const list = [...votes].sort((a, b) => a.at - b.at);
@@ -333,15 +362,17 @@ function results(v, round, q, votes) {
   return `<div class="bars">${rows
     .map((r, i) => {
       const pct = Math.round((r.voters.length / votes.length) * 100);
-      return `<div class="bar" style="--w:${Math.max(pct, 8)}%;--c:${COLORS[i % COLORS.length]}">
-        <div class="track"><div class="fill">${r.member ? avatar(r.member, 'sm') : ''}<span class="lbl">${esc(r.label)}</span><span class="pct">${pct}%</span></div></div>
-        ${stack(r.voters.map((x) => personOf(v, x.by)), 3)}</div>`;
+      const names = r.voters.map((x) => esc(personOf(v, x.by).name)).join(', ');
+      return `<div class="bar ${i === 0 ? 'lead' : ''}" style="--w:${pct}%">
+        <div class="who">${r.member ? avatar(r.member, 'sm') : ''}<span>${esc(r.label)}</span></div><span class="pct">${pct} %</span>
+        <div class="track"><span></span></div>
+        <div class="voters">gewählt von ${names}</div></div>`;
     })
     .join('')}</div>${again}`;
 }
 
 function discussion(v, round, unlocked) {
-  if (!unlocked) return `<div class="disc locked">🔒 Erst antworten – dann siehst du, was die anderen sagen.</div>`;
+  if (!unlocked) return `<div class="disc locked">Erst antworten, dann siehst du, was die anderen dazu sagen.</div>`;
   const list = v.comments.get(round.rid) || [];
   return `<div class="disc">
     <h3>Diskussion ${list.length ? `<small>${list.length}</small>` : ''}</h3>
@@ -366,7 +397,7 @@ function profileFields(name, emoji) {
 // ---------- Ansichten ----------
 
 function vHome() {
-  if (!store.ready && LS.get('groups', []).length) return '<p class="empty spin">Lädt …</p>';
+  if (!store.ready && LS.get('groups', []).length) return '<main><p class="empty">Lädt …</p></main>';
   const groups = [...store.groups.keys()].map((id) => store.view(id));
   const list = groups
     .map((v) => {
@@ -375,17 +406,17 @@ function vHome() {
       const status = !v.meta
         ? v.loading ? 'Lädt …' : 'Keine Daten gefunden'
         : !v.me ? 'Profil anlegen'
-        : answered ? '✓ Heute alles beantwortet'
-        : `🔥 ${open} ${open === 1 ? 'offene Frage' : 'offene Fragen'}`;
+        : answered ? 'Für heute alles beantwortet'
+        : `${open} ${open === 1 ? 'Frage wartet' : 'Fragen warten'} auf dich`;
       return `<a class="gcard ${answered ? '' : 'hot'}" href="#/g/${v.id}">
         <div><b>${esc(v.meta?.name || 'Gruppe')}</b><small>${status}</small></div>${stack(v.members)}</a>`;
     })
     .join('');
-  return `${topbar('<span class="logo" aria-hidden="true">❓</span>', '<h1>Fragerunde</h1>', `<a class="ibtn" href="#/einstellungen" aria-label="Einstellungen">${I.gear}</a>`)}
+  return `${topbar('<h1 class="wordmark">Fragerunde</h1>', '', `<a class="ibtn" href="#/einstellungen" aria-label="Einstellungen">${I.gear}</a>`)}
   <main>${pendingBanner()}
     ${groups.length ? `<div class="glist">${list}</div>` : `<section class="hero">
-      <h2>Jeden Tag eine Frage für eure Gruppe.</h2>
-      <p>Wer würde am ehesten …? Stimmt ab, seht danach, wer wen gewählt hat, und diskutiert. Ohne Konto, ohne Werbung, Ende-zu-Ende-verschlüsselt.</p></section>`}
+      <h2>Wer landet am ehesten im Gefängnis?</h2>
+      <p>Jeden Morgen liegt für eure Gruppe eine neue Frage auf dem Tisch. Ihr stimmt ab, seht danach, wer wen gewählt hat – und habt was zu bereden. Kein Konto, keine Werbung, kein Server, der mitliest.</p></section>`}
     <div class="actions">
       <a class="btn primary" href="#/neu">${I.plus} Neue Gruppe</a>
       <button class="btn" data-action="scan">${I.qr} Einladung scannen</button>
@@ -415,10 +446,10 @@ function vJoin(code) {
   }
   const hint =
     isIOS && !standalone
-      ? `<div class="note">📱 <b>Tipp fürs iPhone:</b> Tippe erst auf <i>Teilen → Zum Home-Bildschirm</i>, öffne die App dort und scanne den Code dann über „Einladung scannen". Sonst landet die Gruppe nur hier in Safari.</div>`
+      ? `<div class="note"><b>Tipp fürs iPhone:</b> Tippe erst auf <i>Teilen → Zum Home-Bildschirm</i>, öffne die App dort und scanne den Code dann über „Einladung scannen". Sonst landet die Gruppe nur hier in Safari.</div>`
       : '';
   return `${topbar(back, '<h1>Einladung</h1>')}
-  <main><section class="hero"><h2>Du wurdest in eine Gruppe eingeladen 🎉</h2>
+  <main><section class="hero"><h2>Du bist eingeladen.</h2>
     <p>Nach dem Beitritt legst du fest, wie die anderen dich sehen.</p></section>${hint}
     <button class="btn primary" data-action="join" data-code="${esc(inv.id + '.' + inv.key)}">Gruppe beitreten</button></main>`;
 }
@@ -427,7 +458,7 @@ function vGroup(r) {
   const v = store.view(r.gid);
   if (!v) return vMissing();
   const bar = groupBar(v);
-  if (!v.meta) return `${bar}<main>${v.loading ? '<p class="empty spin">Lade Gruppe …</p>' : '<p class="empty">Noch keine Daten gefunden. Sind die Relays erreichbar? (Einstellungen)</p>'}</main>`;
+  if (!v.meta) return `${bar}<main>${v.loading ? '<p class="empty">Lade Gruppe …</p>' : '<p class="empty">Noch keine Daten gefunden. Sind die Relays erreichbar? (Einstellungen)</p>'}</main>`;
   if (!v.me) {
     return `${bar}<main><section class="hero"><h2>Willkommen bei „${esc(v.meta.name)}"</h2>
       <p>${v.members.length} ${v.members.length === 1 ? 'Person ist' : 'Leute sind'} schon dabei. Wie sollen sie dich sehen?</p></section>
@@ -438,9 +469,11 @@ function vGroup(r) {
   const s = myStreak(v);
   const queued = queueOf(v).length;
   return `${bar}<main>${pendingBanner()}
-    <div class="chips"><span class="chip">${s ? `🔥 ${s} ${s === 1 ? 'Tag' : 'Tage'} in Folge` : '🔥 Starte deine Serie'}</span>
-      ${queued ? `<a class="chip" href="#/g/${v.id}/fragen">📬 ${queued} in der Warteschlange</a>` : ''}
-      ${v.members.length < 3 ? `<a class="chip accent" href="#/g/${v.id}/einladen">Freunde einladen</a>` : ''}</div>
+    <p class="meta">${[
+      s ? `Serie: <b>${s} ${s === 1 ? 'Tag' : 'Tage'}</b>` : 'Noch keine Serie',
+      queued ? `<a href="#/g/${v.id}/fragen">${queued} eingereicht</a>` : '',
+      v.members.length < 3 ? `<a href="#/g/${v.id}/einladen">Leute einladen</a>` : '',
+    ].filter(Boolean).join(' · ')}</p>
     ${main ? roundCard(v, main) : '<p class="empty">Heute gibt es keine Frage.</p>'}
     ${rest.length ? `<h3 class="sect">Weitere Fragen heute</h3>${rest.map((x) => roundCard(v, x, { link: true })).join('')}` : ''}
     <a class="btn ghost" href="#/g/${v.id}/fragen">${I.plus} Eigene Frage einreichen</a>
@@ -470,8 +503,8 @@ function vHistory(r) {
         if (!q) return '';
         const votes = v.votes.get(round.rid) || [];
         const mine = votes.some((x) => x.by === store.pk);
-        return `<a class="hrow" href="#/g/${v.id}/r/${round.rid}"><span class="htext">${fill(q.text, v, round.subj)}</span>
-          <span class="hstat ${mine ? 'done' : ''}">${mine ? '✓' : 'offen'} · ${votes.length}</span></a>`;
+        return `<a class="hrow" href="#/g/${v.id}/r/${round.rid}"><span class="htext"><span data-pack="${packOf(round)}">${suit(packOf(round))}</span><span>${fill(q.text, v, round.subj)}</span></span>
+          <span class="hstat ${mine ? 'done' : ''}">${mine ? 'beantwortet' : 'offen'}</span></a>`;
       })
       .join('');
     if (rows) html += `<h3 class="sect">${dayLabel(key)}</h3><div class="hlist">${rows}</div>`;
@@ -487,7 +520,7 @@ function vAsk(r) {
     ['yesno', 'Ja / Nein', 'Einfache Entscheidung'],
     ['either', 'Auswahl', 'Eigene Antwortmöglichkeiten'],
     ['text', 'Freitext', 'Alle schreiben eine Antwort'],
-    ['secret', 'Anonym 🌶️', '„Hast du schon mal …?“ – niemand sieht, wer was sagt, alle schätzen'],
+    ['secret', 'Anonym', '„Hast du schon mal …?“ – niemand sieht, wer was sagt, alle schätzen'],
   ];
   const queue = queueOf(v);
   const mine = queue.filter((r) => r.by === store.pk);
@@ -504,7 +537,7 @@ function vAsk(r) {
     <fieldset class="types"><legend>Art der Frage</legend>${types
       .map(
         ([val, name, desc], i) =>
-          `<label class="type"><input type="radio" name="type" value="${val}" ${i === 0 ? 'checked' : ''}><span><b>${name}</b><small>${desc}</small></span></label>`,
+          `<label class="type"><input type="radio" name="type" value="${val}" ${i === 0 ? 'checked' : ''}><span><b>${name}</b><small>${desc}</small></span><span class="check" aria-hidden="true"></span></label>`,
       )
       .join('')}</fieldset>
     <label for="qtext">Deine Frage</label>
@@ -573,8 +606,9 @@ function vDevice() {
     <button class="btn" data-action="transfer">${I.qr} Umzugs-Code anzeigen</button>
     <div id="transfer"></div>
     <h3 class="sect">Über</h3>
-    <p class="hint">Fragerunde ist freie Software (MIT). Die Daten liegen verschlüsselt auf öffentlichen Nostr-Relays – es gibt keinen eigenen Server, kein Konto und kein Tracking.
-    <br><a href="${REPO_URL}" target="_blank" rel="noopener">Quellcode</a></p>
+    <p class="hint">Fragerunde ist freie Software (MIT). Die Daten liegen verschlüsselt auf öffentlichen Nostr-Relays – es gibt keinen eigenen Server, kein Konto und kein Tracking.</p>
+    <p class="hint"><b>Mit KI gemacht:</b> Code, Gestaltung, Texte und die Fragen dieser App wurden von KI erzeugt (Claude von Anthropic, neue Fragen mit GitHub Copilot) – ein Mensch hat die Richtung vorgegeben.</p>
+    <p class="hint"><a href="${REPO_URL}" target="_blank" rel="noopener">Quellcode auf GitHub</a></p>
   </main>`;
 }
 
@@ -612,10 +646,10 @@ async function refreshNotify() {
             : 'Dieser Browser kann nicht im Hintergrund prüfen. Am besten klappt es mit Chrome auf Android, wenn die App installiert ist.'
         }</p>`
       : state === 'on'
-        ? `<p class="hint">✓ Aktiv. Die App schaut ab und zu nach neuen Kommentaren und offenen Fragen des Tages (nicht zwischen 22 und 8 Uhr). Wie oft, entscheidet Android.</p>
+        ? `<p class="hint"><b>Aktiv.</b> Die App schaut ab und zu nach neuen Kommentaren und offenen Fragen des Tages (nicht zwischen 22 und 8 Uhr). Wie oft, entscheidet Android.</p>
            <div class="row"><button class="btn" data-action="notify-test">Test</button><button class="btn ghost" data-action="notify-off">Ausschalten</button></div>`
         : `<p class="hint">Lass dich an die Fragen des Tages und neue Kommentare erinnern. Funktioniert nur, wenn die App installiert ist (Menü → „Zum Startbildschirm hinzufügen“).</p>
-           <button class="btn" data-action="notify-on">🔔 Benachrichtigungen aktivieren</button>`;
+           <button class="btn" data-action="notify-on">Benachrichtigungen aktivieren</button>`;
 }
 
 // ---------- Routing & Zeichnen ----------

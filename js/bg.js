@@ -70,9 +70,9 @@ self.FR = (() => {
   function message({ name, comments, daily, names }) {
     const who = (pk) => names[pk] || 'Jemand';
     const lines = [];
-    if (comments.length === 1) lines.push(`💬 ${who(comments[0].by)}: ${comments[0].data.text}`);
-    else if (comments.length > 1) lines.push(`💬 ${comments.length} neue Kommentare`);
-    if (daily) lines.push('🔥 Die Fragen von heute warten auf dich');
+    if (comments.length === 1) lines.push(`${who(comments[0].by)}: ${comments[0].data.text}`);
+    else if (comments.length > 1) lines.push(`${comments.length} neue Kommentare`);
+    if (daily) lines.push('Die Fragen von heute warten auf dich.');
     return lines.length ? { title: name, body: lines.join('\n') } : null;
   }
 
