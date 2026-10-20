@@ -17,7 +17,7 @@ test('Katalog: eindeutige IDs, gültige Typen, Platzhalter nur wo erlaubt', () =
   for (const q of CATALOG) {
     assert.ok(L.TYPE_LABEL[q.type], q.id);
     if (q.type === 'either') assert.ok(q.options.length >= 2, q.id);
-    if (q.type === 'who' || q.type === 'never' || q.type === 'either') assert.ok(!/\{[AB]\}/.test(q.text), q.id);
+    if (['who', 'never', 'either', 'secret'].includes(q.type)) assert.ok(!/\{[AB]\}/.test(q.text), q.id);
   }
   assert.ok(CATALOG.length > 150);
 });
@@ -107,6 +107,20 @@ test('Auszählung sortiert nach Stimmen', () => {
     { data: { choice: '0' } },
   ]);
   assert.deepEqual(rows.map((r) => [r.label, r.voters.length]), [['Nein', 2], ['Ja', 1]]);
+});
+
+test('Anonyme Runde: Ja-Anzahl und bester Tipp', () => {
+  const answers = ['0', '1', '0', '0'].map((choice) => ({ data: { choice } }));
+  const guesses = [
+    { by: 'aa', data: { guess: 1 } },
+    { by: 'bb', data: { guess: 3 } },
+    { by: 'cc', data: { guess: 4 } },
+    { by: 'dd', data: {} },
+  ];
+  const r = L.secretResult(answers, guesses);
+  assert.equal(r.yes, 3);
+  assert.equal(r.total, 4);
+  assert.deepEqual(r.ranked.map((g) => [g.by, g.best]), [['bb', true], ['cc', false], ['aa', false]]);
 });
 
 test('Serie zählt aufeinanderfolgende Tage', () => {

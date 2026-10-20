@@ -7,6 +7,7 @@
 //   never  – "Ich hab noch nie …"
 //   either – Auswahl aus festen Optionen
 //   text   – freie Antwort, {A} wird durch ein Mitglied ersetzt
+//   secret – anonymes Ja/Nein über sich selbst, alle schätzen die Ja-Anzahl
 
 import GENERATED from './questions-generated.js';
 
@@ -18,6 +19,7 @@ export const PACKS = [
   { id: 'party', name: 'Party', emoji: '🎉', desc: 'Für den Abend danach' },
   { id: 'frech', name: 'Frech', emoji: '😈', desc: 'Nicht ganz so lieb' },
   { id: 'tiefgang', name: 'Tiefgang', emoji: '💛', desc: 'Ehrliche Fragen für gute Freunde' },
+  { id: 'unteruns', name: 'Unter uns', emoji: '🌶️', desc: 'Spicy und anonym: Wie viele von euch …?', adult: true },
 ];
 
 // Die Tagesfrage kommt immer aus diesem Paket, die anderen sind Zusatzpakete
@@ -30,6 +32,7 @@ const yesno = (text) => ({ type: 'yesno', text });
 const never = (text) => ({ type: 'never', text: 'Ich hab noch nie ' + text });
 const either = (text, ...options) => ({ type: 'either', text, options });
 const text = (t) => ({ type: 'text', text: t });
+const secret = (t) => ({ type: 'secret', text: t });
 
 const RAW = {
   klassiker: [
@@ -225,6 +228,38 @@ const RAW = {
     text('Was war dein Highlight dieser Woche?'),
     text('Welchen Rat würdest du deinem 16-jährigen Ich geben?'),
     text('Welcher Song beschreibt unsere Gruppe am besten?'),
+  ],
+  unteruns: [
+    secret('Hast du schon mal jemanden aus diesem Freundeskreis geküsst?'),
+    secret('Hast du schon mal Nacktbilder von dir verschickt?'),
+    secret('Bist du schon mal heimlich von einem Date abgehauen?'),
+    secret('Hast du schon mal irgendwo rumgemacht, wo man euch leicht hätte erwischen können?'),
+    secret('Hattest du schon mal einen One-Night-Stand?'),
+    secret('Warst du schon mal in jemanden aus dieser Gruppe verliebt?'),
+    secret('Hast du schon mal heimlich das Handy deines Partners oder deiner Partnerin durchsucht?'),
+    secret('Hast du schon mal jemanden betrogen?'),
+    secret('Hast du schon mal beim Sex an jemand anderen gedacht?'),
+    secret('Hast du schon mal eine Ex-Beziehung wieder aufgewärmt?'),
+    secret('Hattest du schon mal Sex unter freiem Himmel?'),
+    secret('Hattest du schon mal einen Dreier – oder ernsthaft darüber nachgedacht?'),
+    secret('Ist dir schon mal eine sehr intime Nachricht an die falsche Person rausgerutscht?'),
+    secret('Hast du im Rausch schon mal etwas getan, das du bis heute niemandem erzählt hast?'),
+    secret('Hast du außer Alkohol schon mal Drogen probiert?'),
+    secret('Warst du schon mal vergeben und trotzdem auf einer Dating-App?'),
+    secret('Hast du schon mal einen Orgasmus vorgetäuscht?'),
+    secret('Hast du schon mal jemanden nur wegen des Aussehens gedatet?'),
+    secret('Hattest du schon mal was mit dem Ex oder der Ex von jemandem aus deinem Freundeskreis?'),
+    secret('Hast du schon mal jemanden geghostet, nachdem ihr miteinander geschlafen habt?'),
+    secret('Bist du schon mal morgens heimlich gegangen, bevor die andere Person wach war?'),
+    secret('Hattest du schon mal jemanden, den die anderen hier nie kennenlernen sollten?'),
+    secret('Hast du schon mal Sexspielzeug benutzt?'),
+    secret('Findest du gerade jemanden aus dieser Gruppe attraktiv?'),
+    secret('Hast du schon mal auf der Arbeit, in der Schule oder an der Uni mit jemandem rumgemacht?'),
+    secret('Hast du schon mal ein intimes Video von dir gedreht?'),
+    secret('Löschst du deinen Browserverlauf, damit ihn niemand sieht?'),
+    secret('Würdest du für eine Million Euro eine Nacht mit einer fremden Person verbringen?'),
+    secret('Hattest du schon mal eine Affäre mit jemandem, der vergeben war?'),
+    secret('Ist beim Flaschendrehen schon mal mehr passiert, als die Regeln verlangt haben?'),
   ],
 };
 

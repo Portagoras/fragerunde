@@ -18,7 +18,7 @@ on:
       paket:
         description: 'Paket (klassiker = Tagesfragen)'
         type: choice
-        options: [klassiker, geschichten, entweder, niemals, party, frech, tiefgang]
+        options: [klassiker, geschichten, entweder, niemals, party, frech, tiefgang, unteruns]
         default: klassiker
       anzahl:
         description: 'Wie viele neue Fragen?'

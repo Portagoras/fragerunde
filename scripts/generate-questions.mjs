@@ -28,13 +28,14 @@ const MOCK = args.includes('--mock');
 
 // Tonvorgabe pro Paket – ohne sie werden alle Pakete gleich harmlos-witzig.
 const TONE = {
-  klassiker: 'witzig und harmlos, "Wer würde am ehesten …"-Situationen aus dem Alltag, über die man lachen und diskutieren kann',
+  klassiker: 'witzig, "Wer würde am ehesten …"-Situationen, über die man lachen und diskutieren kann; darf frech und ein bisschen spicy sein, läuft aber in jeder Gruppe',
   geschichten: 'kleine absurde Geschichten über eine Person aus der Gruppe, die zum Fantasieren und Lachen einladen',
   entweder: 'kurze, knackige Entweder-oder-Fragen (höchstens 70 Zeichen), echte Dilemmas oder Geschmacksfragen, keine langen Erklärungen',
   niemals: 'Dinge, die viele schon erlebt haben und andere nicht – von harmlos-peinlich bis leicht gewagt, aber nichts Illegales',
-  party: 'rund ums Feiern, Ausgehen, Alkohol, Kater, Flirten und peinliche Partymomente',
-  frech: 'frech, leicht gemein, peinlich-ehrlich: Lästern, Lügen, Flirten, Eifersucht, kleine Sünden – provokant, aber nicht verletzend oder diskriminierend',
+  party: 'spicy rund ums Feiern: Alkohol, Kater, Flirten, Knutschen, Abstürze, peinliche und wilde Partymomente',
+  frech: 'richtig frech und spicy: Lästern, Lügen, Flirten, Sex, Eifersucht, Exen, peinliche Geheimnisse – provokant, gern unangenehm ehrlich',
   tiefgang: 'ernsthaft, warm und ehrlich, KEINE Witze: Freundschaft, Dankbarkeit, Vertrauen, Erinnerungen, Wünsche, Ängste – Fragen, die Nähe schaffen',
+  unteruns: 'spicy Fragen für Erwachsene wie im Partyspiel "Privacy": Sex, Dating, Fremdgehen, Fantasien, Drogen, Peinliches, Geheimnisse. Jede:r beantwortet sie anonym über sich selbst, die Gruppe schätzt, wie viele Ja sagen. Je mehr man über das Ergebnis rätseln kann, desto besser',
 };
 
 const TYPE_HELP = {
@@ -43,6 +44,7 @@ const TYPE_HELP = {
   text: 'Freie Antwort. Nutze {A} als Platzhalter für eine Person, z. B. "{A} eröffnet ein Restaurant. Was steht auf der Karte?" – oder eine offene Frage an alle ohne Platzhalter.',
   never: 'Satz beginnt exakt mit "Ich hab noch nie " und endet mit einem Punkt. Keine Platzhalter.',
   either: 'Entweder-oder-Frage mit 2 bis 4 kurzen Antwortoptionen im Feld "options" (je höchstens 30 Zeichen, gern mit Emoji). Keine Platzhalter.',
+  secret: 'Ja/Nein-Frage an jede:n über sich selbst, z. B. "Hast du schon mal …?" oder "Würdest du …?". Wird anonym beantwortet. Keine Platzhalter.',
 };
 
 const norm = (s) => s.toLowerCase().replace(/\{[ab]\}/g, '').replace(/[^a-zäöüß0-9]/g, '');
@@ -58,7 +60,8 @@ function prompt(pack, existing, types) {
     ...types.map((t) => `- ${t}: ${TYPE_HELP[t]}`),
     '',
     `Schreibe ${PER_PACK} NEUE Fragen auf Deutsch. Regeln:`,
-    '- passend zum Ton oben, gut für Diskussionen; nicht verletzend, diskriminierend oder sexuell explizit',
+    '- passend zum Ton oben, gut für Diskussionen. Spicy ist ausdrücklich erwünscht (Sex, Beziehungen, Rausch, Peinliches),',
+    '  aber nicht pornografisch oder grafisch, nichts mit Minderjährigen, keine Gewalt, nichts Diskriminierendes, niemanden bloßstellen',
     '- nicht zu ähnlich zu den vorhandenen Fragen unten, keine Dubletten untereinander',
     '- höchstens 120 Zeichen pro Frage, geschlechtsneutral formulieren',
     '',
@@ -107,7 +110,7 @@ export function check(q, types, seen) {
   if (text.length < 10 || text.length > 140) return 'Länge';
   if (/\{(?![AB]\})[^}]*\}/.test(text)) return 'unbekannter Platzhalter';
   const ph = /\{[AB]\}/.test(text);
-  if (['who', 'never', 'either'].includes(q.type) && ph) return 'Platzhalter nicht erlaubt';
+  if (['who', 'never', 'either', 'secret'].includes(q.type) && ph) return 'Platzhalter nicht erlaubt';
   if (text.includes('{B}') && !text.includes('{A}')) return '{B} ohne {A}';
   if (q.type === 'never' && !text.startsWith('Ich hab noch nie ')) return 'muss mit "Ich hab noch nie" beginnen';
   const out = { type: q.type, text };

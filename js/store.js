@@ -12,6 +12,8 @@
 //   <tag>:v:<rid>     eigene Stimme zu einer Runde
 //   <tag>:r:<rid>     eigene Frage (Runde)
 //   <tag>:c:<cid>     Kommentar
+//   <tag>:a:<rid>     anonyme Antwort (Paket "Unter uns"), signiert mit
+//                     einem eigenen Schlüssel pro Runde, siehe anonKey()
 
 import { dayKey } from './logic.js';
 
@@ -150,7 +152,9 @@ export class Store extends EventTarget {
     this.pool = new SimplePool({ enableReconnect: true });
     this.groups = new Map();
     this.outbox = LS.get('outbox', []);
+    this.notBefore = LS.get('notBefore', {}); // Event-ID -> frühester Sendezeitpunkt (ms)
     this._timers = {};
+    this._anon = new Map();
   }
 
   async init() {
@@ -232,6 +236,12 @@ export class Store extends EventTarget {
         if (oldest === until) break;
         until = oldest;
       }
+      // Anonyme Antworten sind auf den Tagesbeginn ihrer Runde datiert und
+      // fallen deshalb durch "since" – sie separat komplett holen.
+      if (since) {
+        const anon = await this.pool.querySync(this.relays, { kinds: [KIND], '#t': [g.tag], '#z': ['anon'], limit: 2000 }, { maxWait: 6000 });
+        for (const ev of anon) await this._ingest(g, ev, true);
+      }
     } catch (e) {
       console.warn('sync', e);
     } finally {
@@ -241,11 +251,8 @@ export class Store extends EventTarget {
     }
     if (!this.groups.has(g.id)) return;
     g.sub?.close();
-    g.sub = this.pool.subscribeMany(
-      this.relays,
-      { kinds: [KIND], '#t': [g.tag], since: Math.floor(Date.now() / 1000) - 120 },
-      { onevent: (ev) => this._ingest(g, ev, true) },
-    );
+    // limit 0: nichts Altes, aber alles Neue – auch rückdatierte anonyme Antworten.
+    g.sub = this.pool.subscribeMany(this.relays, { kinds: [KIND], '#t': [g.tag], limit: 0 }, { onevent: (ev) => this._ingest(g, ev, true) });
   }
 
   resync() {
@@ -276,41 +283,56 @@ export class Store extends EventTarget {
     this._changed();
   }
 
-  async _publish(gid, d, data) {
+  // opts.sk: anderer Signierschlüssel, opts.at: fester Zeitstempel,
+  // opts.delay: frühestens nach so vielen Millisekunden senden,
+  // opts.tags: zusätzliche Tags.
+  async _publish(gid, d, data, opts = {}) {
     const g = this.groups.get(gid);
+    const sk = opts.sk || this.sk;
     const full = g.tag + ':' + d;
-    const prev = g.items.get(this.pk + '|' + full);
-    const now = Math.floor(Date.now() / 1000);
+    const prev = g.items.get(window.NostrTools.getPublicKey(sk) + '|' + full);
+    const at = opts.at ?? Math.floor(Date.now() / 1000);
     const ev = window.NostrTools.finalizeEvent(
       {
         kind: KIND,
-        created_at: prev ? Math.max(now, prev.ev.created_at + 1) : now,
-        tags: [['d', full], ['t', g.tag]],
+        created_at: prev ? Math.max(at, prev.ev.created_at + 1) : at,
+        tags: [['d', full], ['t', g.tag], ...(opts.tags || [])],
         content: await encryptJSON(g.key, data),
       },
-      this.sk,
+      sk,
     );
     await this._ingest(g, ev, true);
     // Ältere, noch nicht gesendete Versionen desselben Eintrags verwerfen.
-    this.outbox = this.outbox.filter((e) => e.tags.find((t) => t[0] === 'd')?.[1] !== full);
+    this.outbox = this.outbox.filter((e) => !(e.pubkey === ev.pubkey && e.tags.find((t) => t[0] === 'd')?.[1] === full));
     this.outbox.push(ev);
     LS.set('outbox', this.outbox);
+    if (opts.delay) {
+      this.notBefore[ev.id] = Date.now() + opts.delay;
+      LS.set('notBefore', this.notBefore);
+      setTimeout(() => this.flush(), opts.delay + 100);
+    }
     this.flush();
+  }
+
+  _due(ev) {
+    return !(this.notBefore[ev.id] > Date.now());
   }
 
   async flush() {
     // Kommt während des Sendens etwas Neues dazu, gleich noch eine Runde.
     if (this._flushing) return void (this._again = true);
-    if (!this.outbox.length) return;
+    if (!this.outbox.some((e) => this._due(e))) return;
     this._flushing = true;
     try {
       do {
         this._again = false;
-        for (const ev of [...this.outbox]) {
+        for (const ev of this.outbox.filter((e) => this._due(e))) {
           const res = await Promise.allSettled(this.pool.publish(this.relays, ev));
           if (res.some((r) => r.status === 'fulfilled')) {
             this.outbox = this.outbox.filter((e) => e.id !== ev.id);
+            delete this.notBefore[ev.id];
             LS.set('outbox', this.outbox);
+            LS.set('notBefore', this.notBefore);
           }
         }
       } while (this._again);
@@ -318,6 +340,22 @@ export class Store extends EventTarget {
       this._flushing = false;
       this._changed();
     }
+  }
+
+  // Schlüssel für die anonyme Antwort in einer Runde: aus dem eigenen
+  // geheimen Schlüssel abgeleitet, also auf jedem eigenen Gerät gleich,
+  // für andere aber nicht mit dir verknüpfbar. getEventHash ist hier nur
+  // ein synchrones SHA-256 über einen String mit dem Geheimnis.
+  anonKey(gid, rid) {
+    const k = gid + ':' + rid;
+    if (!this._anon.has(k)) {
+      const { getEventHash, getPublicKey, utils } = window.NostrTools;
+      const sk = utils.hexToBytes(
+        getEventHash({ kind: 0, created_at: 0, tags: [], pubkey: this.pk, content: `fragerunde-anon:${toHex(this.sk)}:${k}` }),
+      );
+      this._anon.set(k, { sk, pk: getPublicKey(sk) });
+    }
+    return this._anon.get(k);
   }
 
   // ---------- Aktionen ----------
@@ -368,6 +406,17 @@ export class Store extends EventTarget {
     return this._publish(gid, 'v:' + rid, { type: 'vote', rid, ...payload });
   }
 
+  // Anonyme Runde: die Antwort (Ja/Nein) geht mit dem Runden-Schlüssel raus,
+  // mit festem Zeitstempel (Tagesbeginn) und 20–90 s später als der Tipp,
+  // damit weder Absender noch Uhrzeit verraten, wer was geantwortet hat.
+  // Der Tipp (wie viele sagen Ja?) läuft offen als normale Stimme.
+  async secretVote(gid, rid, { choice, guess, dayStart, ...fields }) {
+    const { sk } = this.anonKey(gid, rid);
+    const delay = 20000 + Math.floor(Math.random() * 70000);
+    await this._publish(gid, 'a:' + rid, { type: 'anon', rid, choice }, { sk, at: dayStart, delay, tags: [['z', 'anon']] });
+    await this.vote(gid, rid, { guess, ...fields });
+  }
+
   async ask(gid, q) {
     const rid = 'c' + randomId(6);
     await this._publish(gid, 'r:' + rid, { type: 'round', rid, day: dayKey(), q });
@@ -391,7 +440,7 @@ export class Store extends EventTarget {
   }
 
   pending() {
-    return this.outbox.length;
+    return this.outbox.filter((e) => this._due(e)).length;
   }
 
   relayStatus() {
@@ -417,6 +466,7 @@ export class Store extends EventTarget {
     const rounds = [];
     const votes = new Map();
     const comments = new Map();
+    const anon = new Map();
     const push = (map, k, v) => (map.get(k) || map.set(k, []).get(k)).push(v);
     let me = null;
     for (const it of g.items.values()) {
@@ -432,11 +482,13 @@ export class Store extends EventTarget {
         rounds.push({ ...data, by: it.by, at: it.at });
       } else if (d.startsWith('c:') && data.type === 'comment') {
         push(comments, data.rid, it);
+      } else if (d === 'a:' + data.rid && data.type === 'anon') {
+        push(anon, data.rid, it);
       }
     }
     members.sort((a, b) => a.joined - b.joined || (a.pk < b.pk ? -1 : 1));
     for (const list of comments.values()) list.sort((a, b) => a.at - b.at);
     if (me?.data.left) me = null;
-    return { id: gid, loading: g.loading, meta, members, rounds, votes, comments, me };
+    return { id: gid, loading: g.loading, meta, members, rounds, votes, comments, anon, me };
   }
 }

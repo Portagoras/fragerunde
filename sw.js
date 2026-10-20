@@ -1,6 +1,6 @@
 // Service Worker: Offline-Fähigkeit und Hintergrund-Check (js/bg.js).
 // Bei jeder Veröffentlichung VERSION erhöhen.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = 'fragerunde-' + VERSION;
 const ASSETS = [
   './',

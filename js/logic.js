@@ -123,6 +123,7 @@ export const TYPE_LABEL = {
   never: 'Ich hab noch nie …',
   either: 'Entweder oder',
   text: 'Erzähl mal',
+  secret: 'Anonym',
 };
 
 export function optionsFor(q, members) {
@@ -133,6 +134,8 @@ export function optionsFor(q, members) {
       return [{ value: '0', label: 'Ja' }, { value: '1', label: 'Nein' }];
     case 'never':
       return [{ value: '0', label: 'Hab ich schon 🙋' }, { value: '1', label: 'Noch nie 😇' }];
+    case 'secret':
+      return [{ value: '0', label: 'Ja 🙈' }, { value: '1', label: 'Nein 😇' }];
     case 'either':
       return (q.options || []).map((o, i) => ({ value: String(i), label: o }));
     default:
@@ -146,6 +149,18 @@ export function tally(options, votes) {
   return rows
     .filter((r) => r.voters.length)
     .sort((x, y) => y.voters.length - x.voters.length);
+}
+
+// Anonyme Runde: wie viele Ja, und wer lag beim Schätzen am nächsten.
+// answers: anonyme Antworten { data: { choice } }, guesses: { by, data: { guess } }
+export function secretResult(answers, guesses) {
+  const yes = answers.filter((a) => a.data.choice === '0').length;
+  const ranked = guesses
+    .filter((g) => Number.isInteger(g.data.guess))
+    .map((g) => ({ by: g.by, guess: g.data.guess, off: Math.abs(g.data.guess - yes) }))
+    .sort((x, y) => x.off - y.off || (x.by < y.by ? -1 : 1));
+  const best = ranked.length ? ranked[0].off : null;
+  return { yes, total: answers.length, ranked: ranked.map((r) => ({ ...r, best: r.off === best })) };
 }
 
 // Tage in Folge, an denen die Tagesfrage beantwortet wurde. Heute zählt

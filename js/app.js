@@ -5,7 +5,7 @@ import * as L from './logic.js';
 const REPO_URL = 'https://github.com/Portagoras/fragerunde';
 const store = new Store();
 const app = document.getElementById('app');
-const ui = { sel: {}, edit: null, lastRoute: null, today: L.dayKey() };
+const ui = { sel: {}, guess: {}, edit: null, lastRoute: null, today: L.dayKey() };
 
 // ---------- kleine Helfer ----------
 
@@ -49,7 +49,7 @@ function packPicker(selected) {
     const n = CATALOG.filter((q) => q.pack === p.id).length;
     const main = p.id === MAIN_PACK;
     return `<label class="pack"><input type="checkbox" name="pack" value="${p.id}" ${main || selected.includes(p.id) ? 'checked' : ''} ${main ? 'disabled' : ''}>
-      <span class="pemoji">${p.emoji}</span><span class="ptext"><b>${esc(p.name)}${main ? ' · immer dabei' : ''}</b><small>${esc(p.desc)} · ${n} Fragen</small></span></label>`;
+      <span class="pemoji">${p.emoji}</span><span class="ptext"><b>${esc(p.name)}${main ? ' · immer dabei' : ''}${p.adult ? ' <span class="badge">18+</span>' : ''}</b><small>${esc(p.desc)} · ${n} Fragen</small></span></label>`;
   }).join('')}</div>`;
 }
 
@@ -181,6 +181,7 @@ function roundById(v, rid) {
 }
 
 const mineIn = (v, rid) => (v.votes.get(rid) || []).find((x) => x.by === store.pk);
+const myAnon = (v, rid) => (v.anon.get(rid) || []).find((x) => x.by === store.anonKey(v.id, rid).pk);
 
 function queueOf(v) {
   const today = L.dayKey();
@@ -272,7 +273,21 @@ function answerForm(v, round, q, votes, mine) {
       <button class="btn primary">Antworten</button>${cancel}</form>`;
   }
   const opts = optionsOf(v, q, votes);
-  const sel = ui.sel[rid] ?? mine?.data.choice;
+  const sel = ui.sel[rid] ?? (q.type === 'secret' ? myAnon(v, rid)?.data.choice : mine?.data.choice);
+  if (q.type === 'secret') {
+    const total = v.members.length;
+    const guess = ui.guess[rid] ?? mine?.data.guess ?? Math.round(total / 2);
+    return `<p class="hint center">🔒 Anonym: Niemand sieht, was du antwortest.</p>
+    <div class="opts">${opts
+      .map((o) => `<button type="button" class="opt ${sel === o.value ? 'on' : ''}" data-action="pick" data-rid="${rid}" data-value="${o.value}" aria-pressed="${sel === o.value}"><span>${esc(o.label)}</span></button>`)
+      .join('')}</div>
+    <div class="guess"><span>Was schätzt du: Wie viele von euch sagen Ja?</span>
+      <div class="stepper"><button type="button" class="ibtn" data-action="guess" data-rid="${rid}" data-step="-1" aria-label="weniger" ${guess <= 0 ? 'disabled' : ''}>−</button>
+      <output aria-live="polite">${guess}</output>
+      <button type="button" class="ibtn" data-action="guess" data-rid="${rid}" data-step="1" aria-label="mehr" ${guess >= total ? 'disabled' : ''}>+</button></div>
+      <small>von ${total}</small></div>
+    <button class="btn primary" data-action="vote" data-rid="${rid}" ${sel == null ? 'disabled' : ''}>Anonym antworten</button>${cancel}`;
+  }
   return `<div class="opts ${q.type === 'who' ? 'grid' : ''}">${opts
     .map(
       (o) => `<button type="button" class="opt ${sel === o.value ? 'on' : ''}" data-action="pick" data-rid="${rid}" data-value="${esc(o.value)}" aria-pressed="${sel === o.value}">
@@ -286,6 +301,25 @@ function answerForm(v, round, q, votes, mine) {
 
 function results(v, round, q, votes) {
   const again = `<button class="link" data-action="edit" data-rid="${round.rid}">Antwort ändern</button>`;
+  if (q.type === 'secret') {
+    const answers = v.anon.get(round.rid) || [];
+    const r = L.secretResult(answers, votes);
+    const pct = r.total ? Math.round((r.yes / r.total) * 100) : 0;
+    const coming = Math.max(0, votes.length - answers.length);
+    return `<div class="secret">
+      <div class="big">🌶️ ${r.yes} von ${r.total} ${r.yes === 1 ? 'sagt' : 'sagen'} Ja</div>
+      <div class="meter" role="img" aria-label="${pct} Prozent Ja"><span style="width:${pct}%"></span></div>
+      ${coming ? `<small class="muted">${coming} anonyme ${coming === 1 ? 'Antwort ist' : 'Antworten sind'} noch unterwegs …</small>` : ''}
+    </div>
+    <h4 class="sub">Tipps</h4>
+    <ul class="guesses">${r.ranked
+      .map((g) => {
+        const m = personOf(v, g.by);
+        return `<li class="${g.best ? 'best' : ''}">${avatar(m, 'sm')}<span>${esc(m.name)}</span><b>${g.guess}</b>${g.best ? '<span aria-label="am nächsten dran">🎯</span>' : ''}</li>`;
+      })
+      .join('')}</ul>
+    <p class="hint center">🔒 In der App sieht niemand, wer was geantwortet hat.</p>${again}`;
+  }
   if (q.type === 'text') {
     const list = [...votes].sort((a, b) => a.at - b.at);
     return `<ul class="answers">${list
@@ -453,6 +487,7 @@ function vAsk(r) {
     ['yesno', 'Ja / Nein', 'Einfache Entscheidung'],
     ['either', 'Auswahl', 'Eigene Antwortmöglichkeiten'],
     ['text', 'Freitext', 'Alle schreiben eine Antwort'],
+    ['secret', 'Anonym 🌶️', '„Hast du schon mal …?“ – niemand sieht, wer was sagt, alle schätzen'],
   ];
   const queue = queueOf(v);
   const mine = queue.filter((r) => r.by === store.pk);
@@ -617,6 +652,7 @@ function render() {
   if (!changed && app.querySelector('.form')) return;
   if (changed) {
     ui.sel = {};
+    ui.guess = {};
     ui.edit = null;
   }
   const html = (VIEWS[r.name] || vHome)(r);
@@ -677,6 +713,19 @@ const ACTIONS = {
     const v = store.view(gidOf());
     const round = roundById(v, rid);
     const mine = (v.votes.get(rid) || []).find((x) => x.by === store.pk);
+    const q = round && questionOf(round);
+    if (q?.type === 'secret') {
+      const prev = myAnon(v, rid);
+      const choice = ui.sel[rid] ?? prev?.data.choice;
+      const guess = ui.guess[rid] ?? mine?.data.guess ?? Math.round(v.members.length / 2);
+      if (choice == null) return;
+      delete ui.sel[rid];
+      delete ui.guess[rid];
+      ui.edit = null;
+      if (prev && mine && prev.data.choice === choice && mine.data.guess === guess) return rerenderKeepScroll();
+      const dayStart = L.dayStartSec(round.slot || round.day);
+      return store.secretVote(v.id, rid, { choice, guess, dayStart, ...dailyFields(round) });
+    }
     const choice = ui.sel[rid] ?? mine?.data.choice;
     if (!round || choice == null) return;
     delete ui.sel[rid];
@@ -685,6 +734,14 @@ const ACTIONS = {
     if (mine && mine.data.choice === choice) return rerenderKeepScroll();
     await store.vote(v.id, rid, { choice, ...dailyFields(round) });
   },
+  guess(el) {
+    const rid = el.dataset.rid;
+    const v = store.view(gidOf());
+    const mine = mineIn(v, rid);
+    const cur = ui.guess[rid] ?? mine?.data.guess ?? Math.round(v.members.length / 2);
+    ui.guess[rid] = Math.min(v.members.length, Math.max(0, cur + Number(el.dataset.step)));
+    rerenderKeepScroll();
+  },
   async withdraw(el) {
     if (!confirm('Frage aus der Warteschlange nehmen?')) return;
     await store.withdraw(gidOf(), el.dataset.rid);
@@ -692,6 +749,7 @@ const ACTIONS = {
   },
   'cancel-edit'(el) {
     delete ui.sel[el.dataset.rid];
+    delete ui.guess[el.dataset.rid];
     ui.edit = null;
     rerenderKeepScroll();
   },

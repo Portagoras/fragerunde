@@ -7,12 +7,13 @@ Freie Alternative zu kommerziellen „Wer würde eher"-Apps: **kein Konto, keine
 ## Funktionen
 
 - **Tagesfrage** aus dem Paket „Klassiker“, dazu **je eine Frage pro aktiviertem Zusatzpaket**. Jedes Paket hat pro Gruppe einen eigenen, gemischten Rhythmus und wiederholt nichts, bis es einmal durch ist.
-- **Fragetypen:** Wer von uns? · Ja/Nein · Ich hab noch nie · Entweder oder · Freitext
+- **Fragetypen:** Wer von uns? · Ja/Nein · Ich hab noch nie · Entweder oder · Freitext · **Anonym**
+- **„Unter uns“ 🌶️ (ab 18, standardmäßig aus):** spicy Fragen über sich selbst, wie beim Partyspiel *Privacy*. Alle antworten **anonym** mit Ja oder Nein und schätzen, wie viele Ja sagen. Am Ende sieht man die Ja-Anzahl und wer am besten getippt hat, aber nicht, wer was geantwortet hat. Auch eigene Fragen können anonym sein.
 - **Platzhalter:** Fragen wie „Würde *Lisa* *Max* beim Armdrücken besiegen?" setzen echte Gruppenmitglieder ein
 - **Fair Play:** Ergebnisse und Diskussion sieht man erst nach der eigenen Antwort
 - **Eigene Fragen** einreichen, auch mit eigenen Antwortmöglichkeiten. Sie kommen in eine **Warteschlange** (FIFO): ab dem nächsten Tag jeden Tag eine, zusätzlich zur Tagesfrage. Bis dahin sind sie für die anderen eine Überraschung und lassen sich noch zurückziehen.
 - **Diskussion** zu jeder Frage, **Verlauf** aller bisherigen Fragen, **Serie** 🔥
-- **7 Fragenpakete** (≈180 Fragen), Zusatzpakete pro Gruppe an- und abschaltbar. **Alle 100 Tage neue Tagesfragen** per GitHub Action und Copilot, Zusatzpakete auf Abruf.
+- **8 Fragenpakete** (≈220 Fragen), Zusatzpakete pro Gruppe an- und abschaltbar. **Alle 100 Tage neue Tagesfragen** per GitHub Action und Copilot, Zusatzpakete auf Abruf.
 - **Benachrichtigungen auf Android** (Chrome, installierte App): Erinnerung an die Fragen des Tages und neue Kommentare. Fürs iPhone ist Web Push geplant, siehe [docs/iphone-push-plan.md](docs/iphone-push-plan.md).
 - **Einladen per QR-Code** oder Link, Scanner in der App
 - **Umzug auf ein neues Gerät** per QR-Code
@@ -27,6 +28,7 @@ Die App ist eine statische Webseite (z. B. auf GitHub Pages). Die Daten liegen a
 - Jedes Gerät erzeugt beim ersten Start ein eigenes Nostr-Schlüsselpaar; damit werden Stimmen signiert, sodass niemand im Namen anderer abstimmen kann.
 - Die **Tagesfrage wird auf jedem Gerät gleich berechnet** (aus Gruppen-Seed und Datum), es braucht also niemanden, der sie verschickt. Die erste abgegebene Stimme legt die Frage des Tages fest.
 - Gespeichert wird als NIP-78-Event (Kind 30078). Pro Person und Eintrag gilt nur die neueste Version.
+- **Anonyme Antworten** werden nicht mit dem eigenen Schlüssel signiert, sondern mit einem Schlüssel, der pro Runde aus dem eigenen geheimen Schlüssel abgeleitet wird. Er ist auf den eigenen Geräten gleich, für andere aber nicht zurückzuverfolgen. Zeitstempel ist immer der Tagesbeginn der Runde, und gesendet wird mit 20–90 Sekunden Verzögerung zum Tipp. Restrisiko: Wer technisch versiert ist und im Moment des Antwortens den Relay-Verkehr live mitschneidet, könnte aus der Ankunftsreihenfolge Schlüsse ziehen. In der App selbst ist nichts zu sehen.
 
 ### Warum nicht Gun.js?
 
@@ -71,6 +73,7 @@ Repository → *Settings* → *Pages* → *Deploy from a branch* → `main` / `/
 
 Die Action `Neue Fragen` lässt die Copilot CLI neue Fragen schreiben. Das Skript prüft jede Frage (Typ, Platzhalter, Länge, Dubletten) und öffnet einen **Pull Request**: Erst nach dem Mergen sind die Fragen in der App.
 
+- Copilot darf ausdrücklich spicy werden (Sex, Beziehungen, Rausch, Peinliches), aber nichts Pornografisches, nichts mit Minderjährigen, keine Gewalt, nichts Diskriminierendes. Die Tagesfragen bleiben gemäßigt, weil sie in jeder Gruppe laufen.
 - **Tagesfragen, automatisch alle 100 Tage:** Die Action läuft jeden Montag und erzeugt 10 neue Fragen fürs Paket „Klassiker“, sobald seit dem Datum in `.github/fragen-state.json` 100 Tage vergangen sind.
 - **Zusatzpakete, auf Abruf:** *Actions → Neue Fragen → Run workflow*, Paket und Anzahl wählen. Jedes Paket bekommt eine eigene Tonvorgabe (z. B. „Tiefgang“ ernsthaft, „Frech“ provokant). Ein Lauf für ein Zusatzpaket lässt den 100-Tage-Zähler der Tagesfragen unberührt.
 
