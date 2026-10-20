@@ -1,8 +1,12 @@
-# Alle 100 Tage neue Fragen mit Copilot (auch Copilot Free) erzeugen und als
-# Pull Request zur Durchsicht vorschlagen. GitHub kann "alle 100 Tage" nicht
-# direkt planen – der Job läuft deshalb jeden Montag und prüft selbst, ob seit
-# der letzten Erzeugung (.github/fragen-state.json) 100 Tage vergangen sind.
-# Von Hand gestartet (Actions → Neue Fragen → Run workflow) läuft er sofort.
+# Neue Fragen mit Copilot (auch Copilot Free) erzeugen und als Pull Request
+# zur Durchsicht vorschlagen.
+#
+# - Automatisch: alle 100 Tage neue TAGESFRAGEN (Paket "klassiker"). GitHub
+#   kann "alle 100 Tage" nicht direkt planen – der Job läuft deshalb jeden
+#   Montag und prüft selbst, ob seit der letzten Erzeugung
+#   (.github/fragen-state.json) 100 Tage vergangen sind.
+# - Auf Abruf: Actions → Neue Fragen → Run workflow, Paket auswählen. So
+#   lassen sich die Zusatzpakete auffüllen, wann immer sie gebraucht werden.
 
 name: Neue Fragen
 
@@ -10,6 +14,16 @@ on:
   schedule:
     - cron: '17 5 * * 1'
   workflow_dispatch:
+    inputs:
+      paket:
+        description: 'Paket (klassiker = Tagesfragen)'
+        type: choice
+        options: [klassiker, geschichten, entweder, niemals, party, frech, tiefgang]
+        default: klassiker
+      anzahl:
+        description: 'Wie viele neue Fragen?'
+        type: number
+        default: 10
 
 permissions:
   contents: write
@@ -21,18 +35,24 @@ concurrency: neue-fragen
 jobs:
   generate:
     runs-on: ubuntu-latest
+    env:
+      PAKET: ${{ inputs.paket || 'klassiker' }}
+      ANZAHL: ${{ inputs.anzahl || 10 }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sind 100 Tage um?
+      - name: Ist etwas zu tun?
         id: due
         run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Auf Abruf: $ANZAHL Fragen für $PAKET"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           last=$(jq -r .last .github/fragen-state.json)
           days=$(( ( $(date +%s) - $(date -d "$last" +%s) ) / 86400 ))
-          echo "Letzte Erzeugung: $last (vor $days Tagen)"
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "$days" -ge 100 ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
+          echo "Letzte Tagesfragen: $last (vor $days Tagen)"
+          if [ "$days" -ge 100 ]; then echo "run=true" >> "$GITHUB_OUTPUT"; fi
 
       - uses: actions/setup-node@v4
         if: steps.due.outputs.run == 'true'
@@ -52,7 +72,7 @@ jobs:
           COPILOT_PAT: ${{ secrets.COPILOT_PAT }}
         run: |
           if [ -n "$COPILOT_PAT" ]; then export COPILOT_GITHUB_TOKEN="$COPILOT_PAT"; fi
-          node scripts/generate-questions.mjs --per-pack 10
+          node scripts/generate-questions.mjs --packs "$PAKET" --per-pack "$ANZAHL"
 
       - name: Tests
         if: steps.due.outputs.run == 'true'
@@ -63,12 +83,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          branch="neue-fragen-$(date +%F)"
+          if [ "$PAKET" = "klassiker" ]; then title="Neue Tagesfragen ($(date +%F))"; else title="Neue Fragen für Paket $PAKET ($(date +%F))"; fi
+          branch="neue-fragen-$PAKET-$(date +%F)-$GITHUB_RUN_ID"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
           git add js/questions-generated.js .github/fragen-state.json
-          git commit -m "Neue Fragen ($(date +%F))"
+          git commit -m "$title"
           git push origin "$branch"
-          gh pr create --title "Neue Fragen ($(date +%F))" --body-file generated-summary.md
+          gh pr create --title "$title" --body-file generated-summary.md
           cat generated-summary.md >> "$GITHUB_STEP_SUMMARY"

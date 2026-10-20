@@ -12,7 +12,7 @@ Freie Alternative zu kommerziellen „Wer würde eher"-Apps: **kein Konto, keine
 - **Fair Play:** Ergebnisse und Diskussion sieht man erst nach der eigenen Antwort
 - **Eigene Fragen** einreichen, auch mit eigenen Antwortmöglichkeiten. Sie kommen in eine **Warteschlange** (FIFO): ab dem nächsten Tag jeden Tag eine, zusätzlich zur Tagesfrage. Bis dahin sind sie für die anderen eine Überraschung und lassen sich noch zurückziehen.
 - **Diskussion** zu jeder Frage, **Verlauf** aller bisherigen Fragen, **Serie** 🔥
-- **7 Fragenpakete** (≈180 Fragen), Zusatzpakete pro Gruppe an- und abschaltbar. **Alle 100 Tage neue Fragen** per GitHub Action und Copilot.
+- **7 Fragenpakete** (≈180 Fragen), Zusatzpakete pro Gruppe an- und abschaltbar. **Alle 100 Tage neue Tagesfragen** per GitHub Action und Copilot, Zusatzpakete auf Abruf.
 - **Benachrichtigungen auf Android** (Chrome, installierte App): Erinnerung an die Fragen des Tages und neue Kommentare. Fürs iPhone ist Web Push geplant, siehe [docs/iphone-push-plan.md](docs/iphone-push-plan.md).
 - **Einladen per QR-Code** oder Link, Scanner in der App
 - **Umzug auf ein neues Gerät** per QR-Code
@@ -59,7 +59,7 @@ Aufbau:
 | `js/questions-generated.js` | Von der GitHub Action erzeugte Fragen (nicht von Hand bearbeiten) |
 | `js/bg.js` | Hintergrund-Check im Service Worker (Android) |
 | `scripts/generate-questions.mjs` | Fragen mit der Copilot CLI erzeugen und prüfen (`--mock` zum Ausprobieren) |
-| `.github/workflows/neue-fragen.yml` | Alle 100 Tage neue Fragen als Pull Request |
+| `.github/workflows/neue-fragen.yml` | Tagesfragen alle 100 Tage, Zusatzpakete auf Abruf – als Pull Request |
 | `sw.js` | Service Worker. Bei jeder Veröffentlichung `VERSION` erhöhen. |
 | `vendor/` | nostr-tools 2.25.2 (Unlicense), qrcode-generator 1.4.4 (MIT), jsQR 1.4.0 (Apache-2.0) |
 
@@ -67,9 +67,12 @@ Aufbau:
 
 Repository → *Settings* → *Pages* → *Deploy from a branch* → `main` / `/ (root)`. Fertig.
 
-## Neue Fragen alle 100 Tage
+## Neue Fragen mit Copilot
 
-Die Action `Neue Fragen` läuft jeden Montag und prüft, ob seit dem Datum in `.github/fragen-state.json` 100 Tage vergangen sind. Dann lässt sie die Copilot CLI pro Paket 10 neue Fragen schreiben. Das Skript prüft jede Frage (Typ, Platzhalter, Länge, Dubletten) und öffnet einen **Pull Request**: Erst nach dem Mergen sind die Fragen in der App. Über *Actions → Neue Fragen → Run workflow* lässt sie sich jederzeit von Hand starten.
+Die Action `Neue Fragen` lässt die Copilot CLI neue Fragen schreiben. Das Skript prüft jede Frage (Typ, Platzhalter, Länge, Dubletten) und öffnet einen **Pull Request**: Erst nach dem Mergen sind die Fragen in der App.
+
+- **Tagesfragen, automatisch alle 100 Tage:** Die Action läuft jeden Montag und erzeugt 10 neue Fragen fürs Paket „Klassiker“, sobald seit dem Datum in `.github/fragen-state.json` 100 Tage vergangen sind.
+- **Zusatzpakete, auf Abruf:** *Actions → Neue Fragen → Run workflow*, Paket und Anzahl wählen. Jedes Paket bekommt eine eigene Tonvorgabe (z. B. „Tiefgang“ ernsthaft, „Frech“ provokant). Ein Lauf für ein Zusatzpaket lässt den 100-Tage-Zähler der Tagesfragen unberührt.
 
 Einmalig einrichten:
 1. **Copilot Free** im eigenen GitHub-Account aktivieren (*Settings → Copilot*). Abgerechnet wird über das Copilot-Kontingent des Repo-Besitzers.

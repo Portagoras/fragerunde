@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Erzeugt neue Fragen pro Paket mit der Copilot CLI und hängt sie an
-// js/questions-generated.js an. Läuft alle 100 Tage in der GitHub Action
-// .github/workflows/neue-fragen.yml.
+// Erzeugt neue Fragen mit der Copilot CLI und hängt sie an
+// js/questions-generated.js an. Läuft in der GitHub Action
+// .github/workflows/neue-fragen.yml: alle 100 Tage für die Tagesfragen
+// (klassiker), für Zusatzpakete auf Abruf.
 //
-//   node scripts/generate-questions.mjs [--per-pack 10] [--packs a,b] [--mock]
+//   node scripts/generate-questions.mjs --packs klassiker [--per-pack 10] [--mock]
 //
 // Copilot bekommt keine Werkzeuge und läuft in einem leeren Ordner: Es soll
 // nur JSON zurückgeben, alles Weitere (Prüfen, Schreiben) macht dieses Skript.
@@ -12,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PACKS, CATALOG } from '../js/questions.js';
+import { PACKS, CATALOG, MAIN_PACK } from '../js/questions.js';
 import GENERATED from '../js/questions-generated.js';
 
 const root = new URL('..', import.meta.url).pathname;
@@ -24,6 +25,17 @@ const opt = (name, fallback) => {
 const PER_PACK = Number(opt('per-pack', 10));
 const ONLY = opt('packs', '')?.split(',').filter(Boolean);
 const MOCK = args.includes('--mock');
+
+// Tonvorgabe pro Paket – ohne sie werden alle Pakete gleich harmlos-witzig.
+const TONE = {
+  klassiker: 'witzig und harmlos, "Wer würde am ehesten …"-Situationen aus dem Alltag, über die man lachen und diskutieren kann',
+  geschichten: 'kleine absurde Geschichten über eine Person aus der Gruppe, die zum Fantasieren und Lachen einladen',
+  entweder: 'kurze, knackige Entweder-oder-Fragen (höchstens 70 Zeichen), echte Dilemmas oder Geschmacksfragen, keine langen Erklärungen',
+  niemals: 'Dinge, die viele schon erlebt haben und andere nicht – von harmlos-peinlich bis leicht gewagt, aber nichts Illegales',
+  party: 'rund ums Feiern, Ausgehen, Alkohol, Kater, Flirten und peinliche Partymomente',
+  frech: 'frech, leicht gemein, peinlich-ehrlich: Lästern, Lügen, Flirten, Eifersucht, kleine Sünden – provokant, aber nicht verletzend oder diskriminierend',
+  tiefgang: 'ernsthaft, warm und ehrlich, KEINE Witze: Freundschaft, Dankbarkeit, Vertrauen, Erinnerungen, Wünsche, Ängste – Fragen, die Nähe schaffen',
+};
 
 const TYPE_HELP = {
   who: 'Man stimmt für eine Person aus der Gruppe. Text beginnt typischerweise mit "Wer …?". Keine Platzhalter.',
@@ -41,11 +53,12 @@ function prompt(pack, existing, types) {
     'Jeden Tag beantwortet die Gruppe eine Frage aus jedem Paket und sieht danach, wer wie abgestimmt hat.',
     '',
     `Paket: "${pack.name}" – ${pack.desc}`,
+    `Ton: ${TONE[pack.id] || pack.desc}`,
     `Erlaubte Fragetypen in diesem Paket: ${types.join(', ')}`,
     ...types.map((t) => `- ${t}: ${TYPE_HELP[t]}`),
     '',
     `Schreibe ${PER_PACK} NEUE Fragen auf Deutsch. Regeln:`,
-    '- lustig, überraschend, gut für Diskussionen; frech ist okay, aber nicht verletzend, diskriminierend oder sexuell explizit',
+    '- passend zum Ton oben, gut für Diskussionen; nicht verletzend, diskriminierend oder sexuell explizit',
     '- nicht zu ähnlich zu den vorhandenen Fragen unten, keine Dubletten untereinander',
     '- höchstens 120 Zeichen pro Frage, geschlechtsneutral formulieren',
     '',
@@ -115,7 +128,12 @@ function main() {
   const summary = [];
   let added = 0;
 
-  for (const pack of PACKS.filter((p) => !ONLY.length || ONLY.includes(p.id))) {
+  const packs = PACKS.filter((p) => !ONLY.length || ONLY.includes(p.id));
+  if (!packs.length) {
+    console.error(`Unbekanntes Paket: ${ONLY.join(', ')}`);
+    process.exit(1);
+  }
+  for (const pack of packs) {
     const existing = CATALOG.filter((q) => q.pack === pack.id);
     const types = [...new Set(existing.map((q) => q.type))];
     let proposals;
@@ -154,9 +172,12 @@ function main() {
     '// Automatisch erzeugt von scripts/generate-questions.mjs – nicht von Hand bearbeiten.\n' +
       `export default ${JSON.stringify(result, null, 2)};\n`,
   );
-  const statePath = join(root, '.github/fragen-state.json');
-  const state = JSON.parse(readFileSync(statePath, 'utf8'));
-  writeFileSync(statePath, JSON.stringify({ ...state, last: new Date().toISOString().slice(0, 10) }, null, 2) + '\n');
+  // Der 100-Tage-Zähler gilt nur für die Tagesfragen.
+  if (packs.some((p) => p.id === MAIN_PACK)) {
+    const statePath = join(root, '.github/fragen-state.json');
+    const state = JSON.parse(readFileSync(statePath, 'utf8'));
+    writeFileSync(statePath, JSON.stringify({ ...state, last: new Date().toISOString().slice(0, 10) }, null, 2) + '\n');
+  }
   writeFileSync(
     join(root, 'generated-summary.md'),
     `Die GitHub Action hat ${added} neue Fragen mit Copilot erzeugt. Bitte vor dem Mergen durchlesen – unpassende einfach in \`js/questions-generated.js\` löschen.\n\n${summary.join('\n')}`,
